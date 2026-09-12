@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -49,8 +50,20 @@ func main() {
 	mux.HandleFunc("GET /api/snapshots", api.Snapshots)
 	mux.Handle("/", dashboard.StaticHandler())
 
-	log.Printf("dashboard listening on http://127.0.0.1%s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	network := "tcp"
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		log.Fatalf("invalid DASHBOARD_ADDR %q: %v", addr, err)
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.To4() != nil {
+		network = "tcp4"
+	}
+	listener, err := net.Listen(network, addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("dashboard listening on %s (%s)", listener.Addr(), network)
+	if err := http.Serve(listener, mux); err != nil {
 		log.Fatal(err)
 	}
 }
