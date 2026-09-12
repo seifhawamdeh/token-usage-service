@@ -1,0 +1,10 @@
+[Unit]
+Description=Hourly token usage burn ingest timer
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

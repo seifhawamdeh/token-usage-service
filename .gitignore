@@ -1,0 +1,16 @@
+.env
+*.exe
+bin/
+dist/
+.idea/
+.vscode/
+*.test
+coverage.out
+/tmp/
+.DS_Store
+
+# Local agent / IDE MCP configs (machine-specific paths)
+.agents/
+.codex/
+.cursor/
+.mcp.json

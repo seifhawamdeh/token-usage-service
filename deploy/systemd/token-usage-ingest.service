@@ -1,0 +1,14 @@
+[Unit]
+Description=Token usage burn ingest (one-shot)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/github-repos/token-usage-service
+EnvironmentFile=%h/github-repos/token-usage-service/.env
+# Build once: go build -o %h/.local/bin/token-usage-ingest ./cmd/ingest
+ExecStart=%h/.local/bin/token-usage-ingest ingest
+Nice=10
+
+[Install]
+WantedBy=default.target
