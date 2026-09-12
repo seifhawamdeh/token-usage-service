@@ -50,6 +50,62 @@ func TestParseSumsAssistantUsage(t *testing.T) {
 	}
 }
 
+func TestParseCacheCreationWindows(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cache.jsonl")
+	content := `{"type":"assistant","message":{"model":"claude-sonnet-5","usage":{"input_tokens":1,"output_tokens":2,"cache_creation_input_tokens":100,"cache_creation":{"ephemeral_5m_input_tokens":20,"ephemeral_1h_input_tokens":80},"cache_read_input_tokens":3}}}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ad := claudecode.New(dir)
+	res := ad.Parse(context.Background(), model.SourceDescriptor{SourcePath: path, StableID: path})
+	if res.Error != nil {
+		t.Fatal(res.Error)
+	}
+	tok := res.Snapshot.Tokens
+	if tok.CacheWrite5m == nil || *tok.CacheWrite5m != 20 {
+		t.Fatalf("5m=%v", tok.CacheWrite5m)
+	}
+	if tok.CacheWrite1h == nil || *tok.CacheWrite1h != 80 {
+		t.Fatalf("1h=%v", tok.CacheWrite1h)
+	}
+	if tok.CacheWrite == nil || *tok.CacheWrite != 100 {
+		t.Fatalf("cache_write total=%v", tok.CacheWrite)
+	}
+}
+
+func TestParseDedupesStreamedChunksByMessageID(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "streamed.jsonl")
+	// Claude Code writes one line per streamed chunk of the same assistant
+	// message: input/cache_read repeat unchanged, output grows as the
+	// stream completes. Only the final (most complete) chunk per message.id
+	// must count, or input/cache_read get multiplied by the chunk count.
+	content := `{"type":"assistant","message":{"id":"msg_1","model":"claude-sonnet-5","usage":{"input_tokens":2,"output_tokens":2,"cache_read_input_tokens":32000}}}
+{"type":"assistant","message":{"id":"msg_1","model":"claude-sonnet-5","usage":{"input_tokens":2,"output_tokens":518,"cache_read_input_tokens":32000}}}
+{"type":"assistant","message":{"id":"msg_2","model":"claude-sonnet-5","usage":{"input_tokens":3,"output_tokens":40,"cache_read_input_tokens":9000}}}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ad := claudecode.New(dir)
+	res := ad.Parse(context.Background(), model.SourceDescriptor{SourcePath: path, StableID: path})
+	if res.Error != nil {
+		t.Fatal(res.Error)
+	}
+	tok := res.Snapshot.Tokens
+	if tok.Input == nil || *tok.Input != 5 {
+		t.Fatalf("input=%v want 2+3=5 (msg_1 counted once)", tok.Input)
+	}
+	if tok.Output == nil || *tok.Output != 558 {
+		t.Fatalf("output=%v want 518+40=558 (final chunk of msg_1, not both)", tok.Output)
+	}
+	if tok.CacheRead == nil || *tok.CacheRead != 41000 {
+		t.Fatalf("cache_read=%v want 32000+9000=41000, not 32000*2+9000", tok.CacheRead)
+	}
+}
+
 func TestMissingTokensStayNil(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "empty.jsonl")

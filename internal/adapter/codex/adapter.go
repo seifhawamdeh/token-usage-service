@@ -16,7 +16,7 @@ import (
 
 const (
 	VendorName = "codex"
-	Version    = "1"
+	Version    = "5"
 )
 
 type Adapter struct {
@@ -86,26 +86,29 @@ type envelope struct {
 }
 
 type sessionMeta struct {
-	SessionID      string `json:"session_id"`
-	ID             string `json:"id"`
-	CWD            string `json:"cwd"`
-	ModelProvider  string `json:"model_provider"`
-	Timestamp      string `json:"timestamp"`
+	SessionID     string `json:"session_id"`
+	ID            string `json:"id"`
+	CWD           string `json:"cwd"`
+	ModelProvider string `json:"model_provider"`
+	Timestamp     string `json:"timestamp"`
 }
 
-type tokenUsagePayload struct {
-	ThreadID          string      `json:"thread_id"`
-	SessionID         string      `json:"session_id"`
-	ThreadTokenUsage  *tokenBucket `json:"thread_token_usage"`
+type eventMsg struct {
+	Type string          `json:"type"`
+	Info json.RawMessage `json:"info"`
+}
+
+type tokenCountInfo struct {
+	TotalTokenUsage *tokenBucket `json:"total_token_usage"`
 }
 
 type tokenBucket struct {
-	InputTokens            *int64 `json:"input_tokens"`
-	CachedInputTokens      *int64 `json:"cached_input_tokens"`
-	CacheWriteInputTokens  *int64 `json:"cache_write_input_tokens"`
-	OutputTokens           *int64 `json:"output_tokens"`
-	ReasoningOutputTokens  *int64 `json:"reasoning_output_tokens"`
-	TotalTokens            *int64 `json:"total_tokens"`
+	InputTokens           *int64 `json:"input_tokens"`
+	CachedInputTokens     *int64 `json:"cached_input_tokens"`
+	CacheWriteInputTokens *int64 `json:"cache_write_input_tokens"`
+	OutputTokens          *int64 `json:"output_tokens"`
+	ReasoningOutputTokens *int64 `json:"reasoning_output_tokens"`
+	TotalTokens           *int64 `json:"total_tokens"`
 }
 
 type turnContext struct {
@@ -123,9 +126,61 @@ func (a *Adapter) Parse(_ context.Context, src model.SourceDescriptor) model.Par
 		sessionID, cwd, modelProvider, lastModel string
 		models                                   = map[string]struct{}{}
 		startedAt, lastAt                        *time.Time
-		lastThread                               *tokenBucket
 		usageEvents                              int
+
+		// Codex's total_token_usage is cumulative within a segment but resets
+		// to near-zero when the context is compacted. To recover the true
+		// session total we sum the peak of each segment rather than taking a
+		// single file-wide max (which would silently drop every segment but
+		// the largest).
+		segPeak    *tokenBucket
+		prevTotal  int64
+		havePrev   bool
+		sum        model.Tokens
+		haveAnySeg bool
 	)
+
+	commitSegment := func() {
+		if segPeak == nil {
+			return
+		}
+		addPtr := func(dst **int64, v *int64) {
+			if v == nil {
+				return
+			}
+			if *dst == nil {
+				zero := int64(0)
+				*dst = &zero
+			}
+			**dst += *v
+		}
+		// Codex's input_tokens INCLUDES cached_input_tokens (verified:
+		// total_tokens == input_tokens + output_tokens always holds, so cache
+		// is a sub-count of input, not additive — unlike Anthropic, where
+		// input_tokens is fresh-only and cache_read is additive on top). The
+		// rating view bills tokens_input and tokens_cache_read as separate
+		// additive pools, so storing raw input_tokens here would double-bill
+		// the cached slice. Store fresh-only input instead.
+		var freshInput *int64
+		if segPeak.InputTokens != nil {
+			fresh := *segPeak.InputTokens
+			if segPeak.CachedInputTokens != nil && *segPeak.CachedInputTokens > 0 {
+				fresh -= *segPeak.CachedInputTokens
+				if fresh < 0 {
+					fresh = 0
+				}
+			}
+			freshInput = &fresh
+		}
+		addPtr(&sum.Input, freshInput)
+		addPtr(&sum.Output, segPeak.OutputTokens)
+		addPtr(&sum.CacheRead, segPeak.CachedInputTokens)
+		addPtr(&sum.CacheWrite, segPeak.CacheWriteInputTokens)
+		addPtr(&sum.Reasoning, segPeak.ReasoningOutputTokens)
+		addPtr(&sum.Total, segPeak.TotalTokens)
+		haveAnySeg = true
+		segPeak = nil
+	}
 
 	sc := bufio.NewScanner(f)
 	buf := make([]byte, 0, 1024*1024)
@@ -172,26 +227,36 @@ func (a *Adapter) Parse(_ context.Context, src model.SourceDescriptor) model.Par
 				lastModel = p.Model
 				models[p.Model] = struct{}{}
 			}
-		case "token_usage_record":
-			var p tokenUsagePayload
+		case "event_msg":
+			var p eventMsg
 			if err := json.Unmarshal(env.Payload, &p); err != nil {
 				continue
 			}
-			if p.SessionID != "" && sessionID == "" {
-				sessionID = p.SessionID
+			if p.Type != "token_count" {
+				continue
 			}
-			if p.ThreadID != "" && sessionID == "" {
-				sessionID = p.ThreadID
+			var info tokenCountInfo
+			if err := json.Unmarshal(p.Info, &info); err != nil {
+				continue
 			}
-			if p.ThreadTokenUsage != nil {
-				lastThread = p.ThreadTokenUsage
+			if info.TotalTokenUsage != nil && info.TotalTokenUsage.TotalTokens != nil {
 				usageEvents++
+				v := *info.TotalTokenUsage.TotalTokens
+				if havePrev && v < prevTotal {
+					commitSegment()
+				}
+				if segPeak == nil || segPeak.TotalTokens == nil || v > *segPeak.TotalTokens {
+					segPeak = info.TotalTokenUsage
+				}
+				prevTotal = v
+				havePrev = true
 			}
 		}
 	}
 	if err := sc.Err(); err != nil {
 		return model.ParseResult{Error: err}
 	}
+	commitSegment()
 
 	stable := src.SourcePath
 	if sessionID != "" {
@@ -202,19 +267,14 @@ func (a *Adapter) Parse(_ context.Context, src model.SourceDescriptor) model.Par
 		modelList = append(modelList, m)
 	}
 	detail, _ := json.Marshal(map[string]any{
-		"aggregation":            "last_thread_token_usage",
-		"token_usage_records":    usageEvents,
-		"rollout_path":           src.SourcePath,
+		"aggregation":        "sum_of_segment_peak_total_token_usage",
+		"token_count_events": usageEvents,
+		"rollout_path":       src.SourcePath,
 	})
 
 	tok := model.Tokens{}
-	if lastThread != nil {
-		tok.Input = lastThread.InputTokens
-		tok.CacheRead = lastThread.CachedInputTokens
-		tok.CacheWrite = lastThread.CacheWriteInputTokens
-		tok.Output = lastThread.OutputTokens
-		tok.Reasoning = lastThread.ReasoningOutputTokens
-		tok.Total = lastThread.TotalTokens
+	if haveAnySeg {
+		tok = sum
 	}
 
 	snap := &model.BurnSnapshot{

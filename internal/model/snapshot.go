@@ -5,17 +5,19 @@ import (
 	"time"
 )
 
-const SnapshotSchemaVersion = 1
+const SnapshotSchemaVersion = 2
 const IdentityVersion = 1
 
 // Tokens uses pointers so missing ≠ zero.
 type Tokens struct {
-	Input      *int64 `json:"input"`
-	Output     *int64 `json:"output"`
-	CacheRead  *int64 `json:"cache_read"`
-	CacheWrite *int64 `json:"cache_write"`
-	Reasoning  *int64 `json:"reasoning"`
-	Total      *int64 `json:"total"`
+	Input         *int64 `json:"input"`
+	Output        *int64 `json:"output"`
+	CacheRead     *int64 `json:"cache_read"`
+	CacheWrite    *int64 `json:"cache_write"`     // total cache-write tokens when known
+	CacheWrite5m  *int64 `json:"cache_write_5m"`  // Anthropic ephemeral 5m writes
+	CacheWrite1h  *int64 `json:"cache_write_1h"`  // Anthropic ephemeral 1h writes
+	Reasoning     *int64 `json:"reasoning"`
+	Total         *int64 `json:"total"`
 }
 
 type BurnSnapshot struct {

@@ -7,7 +7,7 @@
 
 A Go CLI that collects provider-reported usage from agent transcripts, local databases, and Cursor CSV exports. Run it manually or on a schedule to keep queryable snapshots of model usage, token counts, and source metadata.
 
-[Quick start](#quick-start) · [Supported sources](#supported-sources) · [Configuration](#configuration) · [Scheduling](#scheduling) · [Documentation](#documentation)
+[Quick start](#quick-start) · [Supported sources](#supported-sources) · [Dashboard](#dashboard) · [Configuration](#configuration) · [Scheduling](#scheduling) · [Documentation](#documentation)
 
 ## How it works
 
@@ -17,7 +17,7 @@ Discover enabled sources → Compare checkpoints → Parse changed sources → U
 
 Each invocation completes one pass. Snapshots and checkpoints live in PostgreSQL; an external scheduler controls the next run. Discovery work varies by adapter—database and CSV adapters may read contents while discovering sources.
 
-Missing token values remain `null`. Costs are stored only when the source reports them; there are no pricing tables or estimated charges.
+Missing token values remain `null`. Vendors may embed `provider_cost`; optional **list-price** USD is computed in `v_burn_usage_rated` from the `model_costs` catalog — see [cost and accuracy](docs/cost-and-accuracy.md).
 
 ## Quick start
 
@@ -60,12 +60,23 @@ An illustrative unchanged run:
 scanned=12 unchanged_skipped=12 parsed=0 upserted=0 deferred=0 errors=0 path_remotes=0
 ```
 
+## Dashboard
+
+Local read-only UI over Postgres (`v_burn_usage_rated` + snapshots):
+
+```bash
+go run ./cmd/dashboard
+# open http://127.0.0.1:8080
+```
+
+Optional: `DASHBOARD_ADDR=:9090`. Uses the same `DATABASE_URL` / `.env` as ingest.
+
 ## Supported sources
 
 | Adapter | Default source | Usage behavior |
 | --- | --- | --- |
-| `claude-code` | `~/.claude/projects/**/*.jsonl` | Sums assistant message usage |
-| `codex` | `~/.codex/sessions/**/rollout-*.jsonl` | Uses the last cumulative `thread_token_usage` |
+| `claude-code` | `~/.claude/projects/**/*.jsonl` | Dedupes streamed-chunk lines by `message.id`, then sums usage |
+| `codex` | `~/.codex/sessions/**/rollout-*.jsonl` | Sums the peak `total_token_usage` of each compaction segment; input excludes cache overlap |
 | `opencode` | `~/.local/share/opencode/opencode.db` | Reads session token fields |
 | `github-copilot` | `~/.copilot/session-store.db` | Aggregates events with date-aware billing semantics |
 | `gemini` | `~/.gemini/tmp/**/session-*` | Reads local CLI session usage |
@@ -129,6 +140,10 @@ The summary reports scanned, unchanged, parsed, upserted, deferred, and failed s
 | `burn_snapshots` | Latest per-source usage, model metadata, nullable token counts, and optional reported cost |
 | `burn_checkpoints` | Source comparison values and processing signature |
 | `path_remotes` | Source paths, repository roots, and discovered Git remotes |
+| `model_costs` | USD-per-1M-token rate card by `model_key` with dated `[effective_from, effective_to)` periods |
+| `model_cost_aliases` | Vendor/display labels → `model_key` |
+
+Query **`v_burn_usage_rated`** for snapshots plus `rated_cost_usd`. Details: catalog periods, Anthropic 5m/1h cache windows, long-context tiers, and accuracy bands — [cost and accuracy](docs/cost-and-accuracy.md).
 
 Source identity includes the host, adapter, and source path. Reprocessing updates the existing snapshot for that identity. Adapter and schema versions participate in checkpoint comparison.
 
@@ -155,11 +170,12 @@ Stored data includes full source paths, optional workspace metadata, and Git rem
 
 ## Development
 
-Run adapter tests and build the CLI:
+Run adapter tests and build the CLI and dashboard:
 
 ```bash
 go test ./...
 go build -o ./bin/token-usage-ingest ./cmd/ingest
+go build -o ./bin/token-usage-dashboard ./cmd/dashboard
 ```
 
 ## Documentation
@@ -167,8 +183,9 @@ go build -o ./bin/token-usage-ingest ./cmd/ingest
 | Guide | What it covers |
 | --- | --- |
 | [Architecture](docs/architecture.md) | Current design, packages, and schema |
+| [Cost and accuracy](docs/cost-and-accuracy.md) | Rate catalog, cache windows, accuracy expectations |
 | [Provider usage semantics](docs/provider-usage-semantics.md) | Field mappings and adapter accounting contracts |
 | [Product requirements](docs/prd-local-burn-ingest.md) | Scope, goals, and acceptance status |
 | [Scheduling guide](deploy/systemd/README.md) | Timer installation and operations |
 
-Current implementation includes the one-shot CLI, PostgreSQL storage, the adapters above, and systemd units. Git storage, cross-source deduplication, Cursor session-to-usage linking, and an analytics UI remain deferred.
+Current implementation includes the one-shot CLI, PostgreSQL storage, the adapters above, the read-only dashboard, and systemd units. Git storage, cross-source deduplication, and Cursor session-to-usage linking remain deferred.

@@ -10,12 +10,19 @@ import (
 	"github.com/seif/token-usage-service/internal/model"
 )
 
-func TestParseUsesLastThreadTokenUsage(t *testing.T) {
+func TestParseSumsSegmentPeaksAcrossCompactionResets(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rollout-test.jsonl")
+	// Codex's total_token_usage counter is cumulative within a segment but
+	// resets to near-zero on context compaction. sess-1 simulates two
+	// segments: [200, 550] then a reset down to [80, 110]. The true session
+	// total is the sum of each segment's peak (550 + 110 = 660), not a
+	// single file-wide max (which would silently drop the first segment).
 	content := `{"type":"session_meta","timestamp":"2026-09-09T20:00:00Z","payload":{"session_id":"sess-1","cwd":"/tmp/proj","model_provider":"openai"}}
-{"type":"token_usage_record","timestamp":"2026-09-09T20:01:00Z","payload":{"session_id":"sess-1","thread_token_usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110}}}
-{"type":"token_usage_record","timestamp":"2026-09-09T20:02:00Z","payload":{"session_id":"sess-1","thread_token_usage":{"input_tokens":500,"cached_input_tokens":400,"cache_write_input_tokens":0,"output_tokens":50,"reasoning_output_tokens":5,"total_tokens":550}}}
+{"type":"event_msg","timestamp":"2026-09-09T20:00:30Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":180,"cached_input_tokens":100,"output_tokens":15,"reasoning_output_tokens":1,"total_tokens":200}}}}
+{"type":"event_msg","timestamp":"2026-09-09T20:01:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500,"cached_input_tokens":400,"cache_write_input_tokens":0,"output_tokens":50,"reasoning_output_tokens":5,"total_tokens":550}}}}
+{"type":"event_msg","timestamp":"2026-09-09T20:01:30Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":70,"cached_input_tokens":40,"output_tokens":8,"reasoning_output_tokens":1,"total_tokens":80}}}}
+{"type":"event_msg","timestamp":"2026-09-09T20:02:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110}}}}
 `
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -28,11 +35,21 @@ func TestParseUsesLastThreadTokenUsage(t *testing.T) {
 	if res.Snapshot.StableID != "sess-1" {
 		t.Fatalf("stable_id=%s", res.Snapshot.StableID)
 	}
-	if res.Snapshot.Tokens.Input == nil || *res.Snapshot.Tokens.Input != 500 {
-		t.Fatalf("input=%v want last cumulative 500", res.Snapshot.Tokens.Input)
+	// Fresh-only input: (500-400) + (100-40) = 100+60 = 160. Codex's
+	// input_tokens includes cached_input_tokens, so the cached slice must be
+	// subtracted before storing tokens_input, or the rating view double-bills
+	// it (once as input, once as cache_read).
+	if res.Snapshot.Tokens.Input == nil || *res.Snapshot.Tokens.Input != 160 {
+		t.Fatalf("input=%v want fresh-only (500-400)+(100-40)=160", res.Snapshot.Tokens.Input)
 	}
-	if res.Snapshot.Tokens.Total == nil || *res.Snapshot.Tokens.Total != 550 {
-		t.Fatalf("total=%v", res.Snapshot.Tokens.Total)
+	if res.Snapshot.Tokens.Output == nil || *res.Snapshot.Tokens.Output != 60 {
+		t.Fatalf("output=%v want 50+10=60", res.Snapshot.Tokens.Output)
+	}
+	if res.Snapshot.Tokens.CacheRead == nil || *res.Snapshot.Tokens.CacheRead != 440 {
+		t.Fatalf("cache_read=%v want 400+40=440", res.Snapshot.Tokens.CacheRead)
+	}
+	if res.Snapshot.Tokens.Total == nil || *res.Snapshot.Tokens.Total != 660 {
+		t.Fatalf("total=%v want 550+110=660, not a single file-wide max", res.Snapshot.Tokens.Total)
 	}
 	if res.Snapshot.CWD != "/tmp/proj" {
 		t.Fatalf("cwd=%s", res.Snapshot.CWD)

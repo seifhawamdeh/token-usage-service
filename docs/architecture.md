@@ -2,6 +2,7 @@
 
 **Status:** v1 shipped (Postgres + all planned local adapters)  
 **Semantics:** [provider-usage-semantics.md](provider-usage-semantics.md)  
+**Cost / accuracy:** [cost-and-accuracy.md](cost-and-accuracy.md)  
 **Requirements origin:** [prd-local-burn-ingest.md](prd-local-burn-ingest.md)
 
 ## What it is
@@ -32,13 +33,14 @@ schedule → load config → for each enabled adapter:
 | Sink (v1) | **PostgreSQL only** (Git later) |
 | Accounting | Per-source snapshots; disclose double-count risk; no cross-source dedup |
 | Paths | Full absolute paths; **no redaction**; remotes in `path_remotes` |
-| Cost | Store provider-reported signals only; never estimate USD |
+| Cost | `provider_cost` = vendor-reported only; optional `model_costs` rate card → `v_burn_usage_rated.rated_cost_usd` |
 | Tokens | Nullable fields (`*int64`); missing ≠ zero |
 
 ## Package layout
 
 ```text
 cmd/ingest/                 CLI: migrate | validate-config | ingest
+cmd/dashboard/              Local HTTP UI + JSON API
 internal/
   config/                   env loading
   model/                    BurnSnapshot, Checkpoint, PathRemote
@@ -49,6 +51,7 @@ internal/
   pipeline/                 discover → compare → parse → upsert
   pathremote/               git rev-parse / remote get-url
   sink/postgres/            DB + embedded migrations
+  dashboard/                API handlers + embedded static UI
 deploy/systemd/             user timer + oneshot service
 ```
 
@@ -59,7 +62,11 @@ deploy/systemd/             user timer + oneshot service
 | `burn_snapshots` | Latest usage fact per `(host_id, vendor, source_path)` / `source_id` |
 | `burn_checkpoints` | Watermark after successful snapshot write |
 | `path_remotes` | `(host_id, source_path)` → `remote_url`, `repo_root` |
+| `model_costs` | Operator rate card: USD per 1M tokens by `model_key` + **dated** `[effective_from, effective_to)` periods |
+| `model_cost_aliases` | Display / vendor labels → `model_key` |
 | `schema_migrations` | Applied migration filenames |
+
+View **`v_burn_usage_rated`**: joins each snapshot to the rate row covering `COALESCE(last_event_at, started_at, ingested_at)` → `rated_cost_usd`. Full catalog / cache-window / accuracy notes: [cost-and-accuracy.md](cost-and-accuracy.md). `provider_cost` stays vendor-reported.
 
 Identity: `source_id = sha256(v1 ‖ host_id ‖ vendor ‖ source_path)`.  
 Checkpoints also store `processing_signature = adapter@version|schema=N` so parser upgrades force reparse.
@@ -95,9 +102,10 @@ See `.env.example`.
 ## Non-goals (still)
 
 - Desktop app SQLite as system of record
-- Rate tables / invoice reconciliation / Analytics UI
+- Invoice reconciliation / Analytics UI
 - Whole-disk scan, realtime watchers, multi-writer Git
 - Exact deduplicated machine-wide billing totals
+- Cursor session ↔ usage-event join
 
 ## Deferred
 

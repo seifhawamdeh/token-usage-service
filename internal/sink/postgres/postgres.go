@@ -153,16 +153,20 @@ func (s *Sink) UpsertSnapshotAndCheckpoint(ctx context.Context, snap model.BurnS
 			source_id, identity_version, host_id, vendor, source_path, stable_id,
 			provider_session_id, cwd, started_at, last_event_at,
 			model, models, model_provider,
-			tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, tokens_reasoning, tokens_total,
+			tokens_input, tokens_output, tokens_cache_read, tokens_cache_write,
+			tokens_cache_write_5m, tokens_cache_write_1h,
+			tokens_reasoning, tokens_total,
 			provider_cost, billing_regime, usage_detail,
 			adapter_version, snapshot_schema_version, parse_status, ingested_at
 		) VALUES (
 			$1,$2,$3,$4,$5,$6,
 			NULLIF($7,''), NULLIF($8,''), $9, $10,
 			NULLIF($11,''), $12, NULLIF($13,''),
-			$14,$15,$16,$17,$18,$19,
-			$20, NULLIF($21,''), $22,
-			$23,$24,$25,$26
+			$14,$15,$16,$17,
+			$18,$19,
+			$20,$21,
+			$22, NULLIF($23,''), $24,
+			$25,$26,$27,$28
 		)
 		ON CONFLICT (source_id) DO UPDATE SET
 			identity_version = EXCLUDED.identity_version,
@@ -178,6 +182,8 @@ func (s *Sink) UpsertSnapshotAndCheckpoint(ctx context.Context, snap model.BurnS
 			tokens_output = EXCLUDED.tokens_output,
 			tokens_cache_read = EXCLUDED.tokens_cache_read,
 			tokens_cache_write = EXCLUDED.tokens_cache_write,
+			tokens_cache_write_5m = EXCLUDED.tokens_cache_write_5m,
+			tokens_cache_write_1h = EXCLUDED.tokens_cache_write_1h,
 			tokens_reasoning = EXCLUDED.tokens_reasoning,
 			tokens_total = EXCLUDED.tokens_total,
 			provider_cost = EXCLUDED.provider_cost,
@@ -191,7 +197,9 @@ func (s *Sink) UpsertSnapshotAndCheckpoint(ctx context.Context, snap model.BurnS
 		snap.SourceID, snap.IdentityVersion, snap.HostID, snap.Vendor, snap.SourcePath, snap.StableID,
 		snap.ProviderSessionID, snap.CWD, snap.StartedAt, snap.LastEventAt,
 		snap.Model, pqTextArray(snap.Models), snap.ModelProvider,
-		snap.Tokens.Input, snap.Tokens.Output, snap.Tokens.CacheRead, snap.Tokens.CacheWrite, snap.Tokens.Reasoning, snap.Tokens.Total,
+		snap.Tokens.Input, snap.Tokens.Output, snap.Tokens.CacheRead, snap.Tokens.CacheWrite,
+		snap.Tokens.CacheWrite5m, snap.Tokens.CacheWrite1h,
+		snap.Tokens.Reasoning, snap.Tokens.Total,
 		snap.ProviderCost, snap.BillingRegime, nullJSON(snap.UsageDetail),
 		snap.AdapterVersion, snap.SnapshotSchemaVer, snap.ParseStatus, snap.IngestedAt,
 	)

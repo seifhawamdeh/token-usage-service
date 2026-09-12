@@ -3,7 +3,7 @@
 **Status:** v1 shipped (Postgres + adapters) — see [architecture.md](architecture.md)  
 **Semantics:** [provider-usage-semantics.md](provider-usage-semantics.md)
 
-**Out of scope:** desktop-app SQLite as SoR, USD rate tables / invoice reconciliation, Analytics UI (follow-ons).
+**Out of scope:** desktop-app SQLite as SoR, invoice reconciliation, Analytics UI (follow-ons).
 
 ---
 
@@ -57,7 +57,7 @@ Operators need a durable answer to **“what did agent CLIs burn on this machine
 
 ### US-005: Normalized facts — **done**
 
-- [x] Nullable token components; `usage_detail`; no rate tables
+- [x] Nullable token components; `usage_detail`; optional operator rate card (`model_costs`) separate from ingest
 
 ### US-006: Postgres sink — **done**
 

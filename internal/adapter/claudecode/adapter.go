@@ -15,7 +15,7 @@ import (
 
 const (
 	VendorName = "claude-code"
-	Version    = "1"
+	Version    = "3"
 )
 
 type Adapter struct {
@@ -82,21 +82,28 @@ func (a *Adapter) Discover(ctx context.Context) ([]model.SourceDescriptor, error
 	return out, err
 }
 
+type usageObj struct {
+	InputTokens              *int64 `json:"input_tokens"`
+	OutputTokens             *int64 `json:"output_tokens"`
+	CacheCreationInputTokens *int64 `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     *int64 `json:"cache_read_input_tokens"`
+	CacheCreation            *struct {
+		Ephemeral5mInputTokens *int64 `json:"ephemeral_5m_input_tokens"`
+		Ephemeral1hInputTokens *int64 `json:"ephemeral_1h_input_tokens"`
+	} `json:"cache_creation"`
+	OutputTokensDetails *struct {
+		ThinkingTokens *int64 `json:"thinking_tokens"`
+	} `json:"output_tokens_details"`
+}
+
 type lineObj struct {
 	Type    string `json:"type"`
 	CWD     string `json:"cwd"`
 	Session string `json:"sessionId"`
 	Message *struct {
-		Model string `json:"model"`
-		Usage *struct {
-			InputTokens              *int64 `json:"input_tokens"`
-			OutputTokens             *int64 `json:"output_tokens"`
-			CacheCreationInputTokens *int64 `json:"cache_creation_input_tokens"`
-			CacheReadInputTokens     *int64 `json:"cache_read_input_tokens"`
-			OutputTokensDetails      *struct {
-				ThinkingTokens *int64 `json:"thinking_tokens"`
-			} `json:"output_tokens_details"`
-		} `json:"usage"`
+		ID    string    `json:"id"`
+		Model string    `json:"model"`
+		Usage *usageObj `json:"usage"`
 	} `json:"message"`
 	Timestamp string `json:"timestamp"`
 }
@@ -109,12 +116,18 @@ func (a *Adapter) Parse(_ context.Context, src model.SourceDescriptor) model.Par
 	defer f.Close()
 
 	var (
-		sumIn, sumOut, sumCW, sumCR, sumThink int64
-		haveIn, haveOut, haveCW, haveCR, haveThink bool
 		cwd, session, lastModel string
 		models                  = map[string]struct{}{}
-		msgCount                int
 		startedAt, lastAt       *time.Time
+		rawAssistantLines       int
+		// Claude Code writes one line per streamed chunk of an assistant
+		// message, all sharing the same message.id and re-reporting the same
+		// input/cache usage (only output grows as the stream completes).
+		// Dedupe by id and keep the last (most complete) usage per message
+		// before summing, or every raw chunk's input/cache tokens get
+		// counted once per chunk instead of once per message.
+		byMessage = map[string]*usageObj{}
+		noIDSeq   int
 	)
 
 	sc := bufio.NewScanner(f)
@@ -150,35 +163,59 @@ func (a *Adapter) Parse(_ context.Context, src model.SourceDescriptor) model.Par
 		if o.Type != "assistant" || o.Message == nil || o.Message.Usage == nil {
 			continue
 		}
-		u := o.Message.Usage
-		msgCount++
+		rawAssistantLines++
 		if o.Message.Model != "" {
 			lastModel = o.Message.Model
 			models[o.Message.Model] = struct{}{}
 		}
-		add := func(dst *int64, have *bool, v *int64) {
-			if v == nil {
-				return
-			}
-			*dst += *v
-			*have = true
+		id := o.Message.ID
+		if id == "" {
+			noIDSeq++
+			id = fmt.Sprintf("__noid_%d__", noIDSeq)
 		}
-		add(&sumIn, &haveIn, u.InputTokens)
-		add(&sumOut, &haveOut, u.OutputTokens)
-		add(&sumCW, &haveCW, u.CacheCreationInputTokens)
-		add(&sumCR, &haveCR, u.CacheReadInputTokens)
-		if u.OutputTokensDetails != nil {
-			add(&sumThink, &haveThink, u.OutputTokensDetails.ThinkingTokens)
-		}
+		byMessage[id] = o.Message.Usage
 	}
 	if err := sc.Err(); err != nil {
 		return model.ParseResult{Error: err}
 	}
 
-	if msgCount == 0 {
-		// Recognized transcript with no usage — still upsert empty nullable snapshot? Direction: valid with no usage differs from unsupported.
-		// Store snapshot with null tokens so source is tracked.
+	var (
+		sumIn, sumOut, sumCW, sumCW5m, sumCW1h, sumCR, sumThink        int64
+		haveIn, haveOut, haveCW, haveCW5m, haveCW1h, haveCR, haveThink bool
+	)
+	add := func(dst *int64, have *bool, v *int64) {
+		if v == nil {
+			return
+		}
+		*dst += *v
+		*have = true
 	}
+	for _, u := range byMessage {
+		add(&sumIn, &haveIn, u.InputTokens)
+		add(&sumOut, &haveOut, u.OutputTokens)
+		add(&sumCR, &haveCR, u.CacheReadInputTokens)
+		if u.CacheCreation != nil && (u.CacheCreation.Ephemeral5mInputTokens != nil || u.CacheCreation.Ephemeral1hInputTokens != nil) {
+			var w5, w1 int64
+			if u.CacheCreation.Ephemeral5mInputTokens != nil {
+				w5 = *u.CacheCreation.Ephemeral5mInputTokens
+				sumCW5m += w5
+				haveCW5m = true
+			}
+			if u.CacheCreation.Ephemeral1hInputTokens != nil {
+				w1 = *u.CacheCreation.Ephemeral1hInputTokens
+				sumCW1h += w1
+				haveCW1h = true
+			}
+			sumCW += w5 + w1
+			haveCW = true
+		} else {
+			add(&sumCW, &haveCW, u.CacheCreationInputTokens)
+		}
+		if u.OutputTokensDetails != nil {
+			add(&sumThink, &haveThink, u.OutputTokensDetails.ThinkingTokens)
+		}
+	}
+	msgCount := len(byMessage)
 
 	modelList := make([]string, 0, len(models))
 	for m := range models {
@@ -186,7 +223,9 @@ func (a *Adapter) Parse(_ context.Context, src model.SourceDescriptor) model.Par
 	}
 	detail, _ := json.Marshal(map[string]any{
 		"assistant_usage_messages": msgCount,
-		"aggregation":              "sum_assistant_message_usage",
+		"raw_assistant_lines":      rawAssistantLines,
+		"aggregation":              "sum_assistant_message_usage_deduped_by_message_id",
+		"cache_write_windows":      "ephemeral_5m_and_1h_when_present",
 	})
 
 	snap := &model.BurnSnapshot{
@@ -201,11 +240,13 @@ func (a *Adapter) Parse(_ context.Context, src model.SourceDescriptor) model.Par
 		Models:            modelList,
 		ModelProvider:     "anthropic",
 		Tokens: model.Tokens{
-			Input:      ptrIf(haveIn, sumIn),
-			Output:     ptrIf(haveOut, sumOut),
-			CacheWrite: ptrIf(haveCW, sumCW),
-			CacheRead:  ptrIf(haveCR, sumCR),
-			Reasoning:  ptrIf(haveThink, sumThink),
+			Input:        ptrIf(haveIn, sumIn),
+			Output:       ptrIf(haveOut, sumOut),
+			CacheWrite:   ptrIf(haveCW, sumCW),
+			CacheWrite5m: ptrIf(haveCW5m, sumCW5m),
+			CacheWrite1h: ptrIf(haveCW1h, sumCW1h),
+			CacheRead:    ptrIf(haveCR, sumCR),
+			Reasoning:    ptrIf(haveThink, sumThink),
 		},
 		UsageDetail:       detail,
 		AdapterVersion:    Version,
