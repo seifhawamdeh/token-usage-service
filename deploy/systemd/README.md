@@ -12,7 +12,7 @@ cp deploy/systemd/token-usage-ingest.service ~/.config/systemd/user/
 cp deploy/systemd/token-usage-ingest.timer ~/.config/systemd/user/
 ```
 
-Edit `WorkingDirectory` and `EnvironmentFile` in the `.service` if the repo path differs from `~/github-repos/token-usage-service`.
+Edit `WorkingDirectory` and `EnvironmentFile` in the `.service` so they point at **your** clone of this repo (the checked-in unit uses a placeholder path).
 
 ```bash
 systemctl --user daemon-reload

@@ -87,7 +87,7 @@ Advance watermarks **only** after a successful snapshot write.
   - require `#3 == #9 + #10` or skip as drift; dedupe response id `#11`
 - **Model:** prefer display `#21`, else `#19`
 - **CWD:** `trajectory_metadata_blob` workspace URI
-- Never treat Multica JSON embedded in transcripts as AG burn
+- Never treat third-party agent JSON embedded in transcripts as AG burn
 
 ### 3.4 `gemini` (CLI only)
 
@@ -130,7 +130,7 @@ Advance watermarks **only** after a successful snapshot write.
 
 ## 4. Follow-ups
 
-1. Gemini CLI fixtures when `~/.gemini/tmp` is populated on a machine
+1. Gemini CLI fixtures when a machine has `~/.gemini/tmp` data
 2. Copilot pre-cutover / annual-legacy PRU fixtures
 3. Cursor cloud/Admin API (if product needs full Cursor billing)
 4. Optional derived `tokens.input_uncached` for Codex analytics (not ingest core)
