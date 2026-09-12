@@ -3,8 +3,10 @@
 The timer runs one-shot ingest every 12 hours. The dashboard service keeps the
 HTTP dashboard running.
 
-For shared prerequisites, dashboard setup, other operating systems, upgrades,
-and removal, see the [cross-platform service installation guide](../../docs/service-installation.md).
+For shared prerequisites, upgrades, and removal, see the
+[service installation index](../../docs/service-installation.md). For the full
+walkthrough including dashboard setup, see the
+[Linux installation guide](../../docs/service-installation-linux.md).
 
 ## Install
 

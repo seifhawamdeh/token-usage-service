@@ -153,8 +153,10 @@ Source identity includes the host, adapter, and source path. Reprocessing update
 
 ## Scheduling
 
-Use the [cross-platform service installation guide](docs/service-installation.md)
-for Linux/systemd, macOS/launchd, Windows Task Scheduler, and cron. The included
+Use the [service installation index](docs/service-installation.md) for
+prerequisites and upgrades, then the OS-specific guide for your platform:
+[Linux](docs/service-installation-linux.md), [macOS](docs/service-installation-macos.md),
+or [Windows](docs/service-installation-windows.md). The included
 [systemd user service and timer](deploy/systemd/README.md) provide the Linux
 units. Update the service's `WorkingDirectory` and `EnvironmentFile` to match
 your clone before enabling it.
@@ -192,7 +194,10 @@ go build -o ./bin/token-usage-dashboard ./cmd/dashboard
 | [Cost and accuracy](docs/cost-and-accuracy.md) | Rate catalog, cache windows, accuracy expectations |
 | [Provider usage semantics](docs/provider-usage-semantics.md) | Field mappings and adapter accounting contracts |
 | [Product requirements](docs/prd-local-burn-ingest.md) | Scope, goals, and acceptance status |
-| [Service installation](docs/service-installation.md) | Linux, macOS, Windows, cron, upgrades, and verification |
+| [Service installation](docs/service-installation.md) | Shared prerequisites, upgrades, and verification |
+| [Linux installation](docs/service-installation-linux.md) | systemd user timer and cron fallback |
+| [macOS installation](docs/service-installation-macos.md) | launchd agents for ingest and dashboard |
+| [Windows installation](docs/service-installation-windows.md) | Task Scheduler via GUI or PowerShell |
 | [Scheduling guide](deploy/systemd/README.md) | Timer installation and operations |
 
 Current implementation includes the one-shot CLI, PostgreSQL storage, the adapters above, the read-only dashboard, and systemd units. Git storage, cross-source deduplication, and Cursor session-to-usage linking remain deferred.
