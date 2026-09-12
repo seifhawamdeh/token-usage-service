@@ -1,0 +1,14 @@
+[Unit]
+Description=Token usage dashboard
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/src/token-usage-service
+EnvironmentFile=%h/src/token-usage-service/.env
+ExecStart=%h/.local/bin/token-usage-dashboard
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

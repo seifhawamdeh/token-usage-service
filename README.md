@@ -70,6 +70,8 @@ go run ./cmd/dashboard
 ```
 
 Optional: `DASHBOARD_ADDR=:9090`. Uses the same `DATABASE_URL` / `.env` as ingest.
+Use the machine selector to filter every dashboard total, chart, model, and
+snapshot by `HOST_ID`.
 
 ## Supported sources
 
@@ -151,7 +153,11 @@ Source identity includes the host, adapter, and source path. Reprocessing update
 
 ## Scheduling
 
-Use the included [systemd user service and 12-hour timer](deploy/systemd/README.md). Follow the installation guide and update the service's `WorkingDirectory` and `EnvironmentFile` to match your clone before enabling it.
+Use the [cross-platform service installation guide](docs/service-installation.md)
+for Linux/systemd, macOS/launchd, Windows Task Scheduler, and cron. The included
+[systemd user service and timer](deploy/systemd/README.md) provide the Linux
+units. Update the service's `WorkingDirectory` and `EnvironmentFile` to match
+your clone before enabling it.
 
 After installing the units:
 
@@ -186,6 +192,7 @@ go build -o ./bin/token-usage-dashboard ./cmd/dashboard
 | [Cost and accuracy](docs/cost-and-accuracy.md) | Rate catalog, cache windows, accuracy expectations |
 | [Provider usage semantics](docs/provider-usage-semantics.md) | Field mappings and adapter accounting contracts |
 | [Product requirements](docs/prd-local-burn-ingest.md) | Scope, goals, and acceptance status |
+| [Service installation](docs/service-installation.md) | Linux, macOS, Windows, cron, upgrades, and verification |
 | [Scheduling guide](deploy/systemd/README.md) | Timer installation and operations |
 
 Current implementation includes the one-shot CLI, PostgreSQL storage, the adapters above, the read-only dashboard, and systemd units. Git storage, cross-source deduplication, and Cursor session-to-usage linking remain deferred.

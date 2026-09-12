@@ -128,6 +128,7 @@ function renderSnaps(rows) {
       const win = `${fmt.compact(r.tokens_cache_write_5m)} / ${fmt.compact(r.tokens_cache_write_1h)}`;
       return `<tr>
         <td class="num">${fmt.when(when)}</td>
+        <td>${escapeHtml(r.machine)}</td>
         <td>${escapeHtml(r.vendor)}</td>
         <td>${escapeHtml(r.model || "—")}</td>
         <td class="num">${fmt.compact(r.tokens_input)}</td>
@@ -158,19 +159,41 @@ function fillVendorFilter(vendors) {
   sel.value = cur;
 }
 
+function fillMachineFilter(machines) {
+  const sel = document.getElementById("machineFilter");
+  const cur = sel.value;
+  sel.innerHTML =
+    `<option value="">All machines</option>` +
+    machines
+      .map((m) => `<option value="${escapeHtml(m.machine)}">${escapeHtml(m.machine)} (${fmt.int(m.sources)})</option>`)
+      .join("");
+  sel.value = cur;
+}
+
+function withMachine(path, params = {}) {
+  const machine = document.getElementById("machineFilter").value;
+  const query = new URLSearchParams(params);
+  if (machine) query.set("machine", machine);
+  const suffix = query.toString();
+  return suffix ? `${path}?${suffix}` : path;
+}
+
 async function loadSnaps() {
   const vendor = document.getElementById("vendorFilter").value;
-  const q = vendor ? `?vendor=${encodeURIComponent(vendor)}&limit=80` : "?limit=80";
-  const snaps = await getJSON(`/api/snapshots${q}`);
+  const params = { limit: "80" };
+  if (vendor) params.vendor = vendor;
+  const snaps = await getJSON(withMachine("/api/snapshots", params));
   renderSnaps(snaps);
 }
 
 async function loadAll() {
+	const machines = await getJSON("/api/machines");
+	fillMachineFilter(machines);
   const [summary, vendors, models, daily] = await Promise.all([
-    getJSON("/api/summary"),
-    getJSON("/api/by-vendor"),
-    getJSON("/api/by-model?limit=40"),
-    getJSON("/api/daily?days=45"),
+    getJSON(withMachine("/api/summary")),
+    getJSON(withMachine("/api/by-vendor")),
+    getJSON(withMachine("/api/by-model", { limit: "40" })),
+    getJSON(withMachine("/api/daily", { days: "45" })),
   ]);
   renderKpis(summary);
   renderProviderBoxes(vendors);
@@ -186,6 +209,9 @@ document.getElementById("refreshBtn").addEventListener("click", () => {
 });
 document.getElementById("vendorFilter").addEventListener("change", () => {
   loadSnaps().catch((e) => alert(e.message));
+});
+document.getElementById("machineFilter").addEventListener("change", () => {
+  loadAll().catch((e) => alert(e.message));
 });
 
 loadAll().catch((e) => {

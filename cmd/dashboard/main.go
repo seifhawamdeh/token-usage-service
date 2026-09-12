@@ -41,6 +41,7 @@ func main() {
 	api := &dashboard.API{DB: db}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", api.Health)
+	mux.HandleFunc("GET /api/machines", api.Machines)
 	mux.HandleFunc("GET /api/summary", api.Summary)
 	mux.HandleFunc("GET /api/by-vendor", api.ByVendor)
 	mux.HandleFunc("GET /api/by-model", api.ByModel)

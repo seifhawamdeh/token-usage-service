@@ -16,6 +16,9 @@
       <h1>Burn dashboard</h1>
     </div>
     <div class="top-meta">
+      <select id="machineFilter" aria-label="Filter dashboard by machine">
+        <option value="">All machines</option>
+      </select>
       <span id="rangeLabel">—</span>
       <button type="button" id="refreshBtn">Refresh</button>
     </div>
@@ -75,6 +78,7 @@
           <thead>
             <tr>
               <th>When</th>
+              <th>Machine</th>
               <th>Vendor</th>
               <th>Model</th>
               <th class="num">In</th>

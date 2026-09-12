@@ -35,6 +35,7 @@ func (a *API) Health(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) Summary(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	machine := r.URL.Query().Get("machine")
 	row := a.DB.QueryRowContext(ctx, `
 		SELECT
 			count(*)::bigint,
@@ -51,36 +52,38 @@ func (a *API) Summary(w http.ResponseWriter, r *http.Request) {
 			min(last_event_at),
 			max(last_event_at)
 		FROM v_burn_usage_rated
-	`)
+		WHERE ($1 = '' OR host_id = $1)
+	`, machine)
 	var (
-		sources, nonCursor int64
+		sources, nonCursor         int64
 		in, out, cr, cw, cw5, cw1h int64
-		rated, provider float64
-		ratedRows int64
-		minAt, maxAt sql.NullTime
+		rated, provider            float64
+		ratedRows                  int64
+		minAt, maxAt               sql.NullTime
 	)
 	if err := row.Scan(&sources, &nonCursor, &in, &out, &cr, &cw, &cw5, &cw1h, &rated, &provider, &ratedRows, &minAt, &maxAt); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]any{
-		"sources":              sources,
-		"sources_non_cursor":   nonCursor,
-		"tokens_input":         in,
-		"tokens_output":        out,
-		"tokens_cache_read":    cr,
-		"tokens_cache_write":   cw,
-		"tokens_cache_write_5m": cw5,
-		"tokens_cache_write_1h": cw1h,
-		"rated_cost_usd":       rated,
-		"provider_cost_sum":    provider,
+		"sources":                 sources,
+		"sources_non_cursor":      nonCursor,
+		"tokens_input":            in,
+		"tokens_output":           out,
+		"tokens_cache_read":       cr,
+		"tokens_cache_write":      cw,
+		"tokens_cache_write_5m":   cw5,
+		"tokens_cache_write_1h":   cw1h,
+		"rated_cost_usd":          rated,
+		"provider_cost_sum":       provider,
 		"sources_with_rated_cost": ratedRows,
-		"first_event_at":       nullTime(minAt),
-		"last_event_at":        nullTime(maxAt),
+		"first_event_at":          nullTime(minAt),
+		"last_event_at":           nullTime(maxAt),
 	})
 }
 
 func (a *API) ByVendor(w http.ResponseWriter, r *http.Request) {
+	machine := r.URL.Query().Get("machine")
 	rows, err := a.DB.QueryContext(r.Context(), `
 		SELECT vendor,
 			count(*)::bigint,
@@ -91,9 +94,10 @@ func (a *API) ByVendor(w http.ResponseWriter, r *http.Request) {
 			COALESCE(sum(rated_cost_usd), 0),
 			count(rated_cost_usd)::bigint
 		FROM v_burn_usage_rated
+		WHERE ($1 = '' OR host_id = $1)
 		GROUP BY vendor
 		ORDER BY COALESCE(sum(rated_cost_usd), 0) DESC, count(*) DESC
-	`)
+	`, machine)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -120,6 +124,7 @@ func (a *API) ByVendor(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) ByModel(w http.ResponseWriter, r *http.Request) {
 	limit := queryInt(r, "limit", 40)
+	machine := r.URL.Query().Get("machine")
 	rows, err := a.DB.QueryContext(r.Context(), `
 		SELECT COALESCE(NULLIF(model, ''), '(unknown)') AS model,
 			COALESCE(vendor, '') AS vendor,
@@ -128,10 +133,11 @@ func (a *API) ByModel(w http.ResponseWriter, r *http.Request) {
 			COALESCE(sum(tokens_output), 0),
 			COALESCE(sum(rated_cost_usd), 0)
 		FROM v_burn_usage_rated
+		WHERE ($1 = '' OR host_id = $1)
 		GROUP BY 1, 2
 		ORDER BY COALESCE(sum(rated_cost_usd), 0) DESC, count(*) DESC
-		LIMIT $1
-	`, limit)
+		LIMIT $2
+	`, machine, limit)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -156,6 +162,7 @@ func (a *API) ByModel(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) Daily(w http.ResponseWriter, r *http.Request) {
 	days := queryInt(r, "days", 45)
+	machine := r.URL.Query().Get("machine")
 	rows, err := a.DB.QueryContext(r.Context(), `
 		SELECT day::date::text,
 			COALESCE(sum(tokens_input), 0),
@@ -166,11 +173,12 @@ func (a *API) Daily(w http.ResponseWriter, r *http.Request) {
 			SELECT date_trunc('day', COALESCE(last_event_at, started_at, ingested_at)) AS day,
 				tokens_input, tokens_output, rated_cost_usd
 			FROM v_burn_usage_rated
-			WHERE COALESCE(last_event_at, started_at, ingested_at) >= (CURRENT_TIMESTAMP - make_interval(days => $1))
+			WHERE ($1 = '' OR host_id = $1)
+			  AND COALESCE(last_event_at, started_at, ingested_at) >= (CURRENT_TIMESTAMP - make_interval(days => $2))
 		) t
 		GROUP BY day
 		ORDER BY day
-	`, days)
+	`, machine, days)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -197,26 +205,21 @@ func (a *API) Snapshots(w http.ResponseWriter, r *http.Request) {
 	limit := queryInt(r, "limit", 50)
 	offset := queryInt(r, "offset", 0)
 	vendor := r.URL.Query().Get("vendor")
+	machine := r.URL.Query().Get("machine")
 
 	q := `
-		SELECT source_id, vendor, COALESCE(model, ''), source_path,
+		SELECT source_id, host_id, vendor, COALESCE(model, ''), source_path,
 			tokens_input, tokens_output, tokens_cache_read, tokens_cache_write,
 			tokens_cache_write_5m, tokens_cache_write_1h,
 			rated_cost_usd, provider_cost, last_event_at, started_at
 		FROM v_burn_usage_rated
+		WHERE ($1 = '' OR host_id = $1)
+		  AND ($2 = '' OR vendor = $2)
+		ORDER BY COALESCE(last_event_at, started_at, ingested_at) DESC NULLS LAST
+		LIMIT $3 OFFSET $4
 	`
-	args := []any{}
-	if vendor != "" {
-		q += ` WHERE vendor = $1`
-		args = append(args, vendor)
-		q += ` ORDER BY COALESCE(last_event_at, started_at, ingested_at) DESC NULLS LAST LIMIT $2 OFFSET $3`
-		args = append(args, limit, offset)
-	} else {
-		q += ` ORDER BY COALESCE(last_event_at, started_at, ingested_at) DESC NULLS LAST LIMIT $1 OFFSET $2`
-		args = append(args, limit, offset)
-	}
 
-	rows, err := a.DB.QueryContext(r.Context(), q, args...)
+	rows, err := a.DB.QueryContext(r.Context(), q, machine, vendor, limit, offset)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -226,24 +229,50 @@ func (a *API) Snapshots(w http.ResponseWriter, r *http.Request) {
 	out := []map[string]any{}
 	for rows.Next() {
 		var (
-			id, vendor, model, path string
-			in, outTok, cr, cw      sql.NullInt64
-			cw5, cw1h               sql.NullInt64
-			rated, pcost            sql.NullFloat64
-			lastAt, startAt         sql.NullTime
+			id, machine, vendor, model, path string
+			in, outTok, cr, cw               sql.NullInt64
+			cw5, cw1h                        sql.NullInt64
+			rated, pcost                     sql.NullFloat64
+			lastAt, startAt                  sql.NullTime
 		)
-		if err := rows.Scan(&id, &vendor, &model, &path, &in, &outTok, &cr, &cw, &cw5, &cw1h, &rated, &pcost, &lastAt, &startAt); err != nil {
+		if err := rows.Scan(&id, &machine, &vendor, &model, &path, &in, &outTok, &cr, &cw, &cw5, &cw1h, &rated, &pcost, &lastAt, &startAt); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
 		out = append(out, map[string]any{
-			"source_id": id, "vendor": vendor, "model": model, "source_path": path,
+			"source_id": id, "machine": machine, "vendor": vendor, "model": model, "source_path": path,
 			"tokens_input": nullInt(in), "tokens_output": nullInt(outTok),
 			"tokens_cache_read": nullInt(cr), "tokens_cache_write": nullInt(cw),
 			"tokens_cache_write_5m": nullInt(cw5), "tokens_cache_write_1h": nullInt(cw1h),
 			"rated_cost_usd": nullFloat(rated), "provider_cost": nullFloat(pcost),
 			"last_event_at": nullTime(lastAt), "started_at": nullTime(startAt),
 		})
+	}
+	writeJSON(w, 200, out)
+}
+
+func (a *API) Machines(w http.ResponseWriter, r *http.Request) {
+	rows, err := a.DB.QueryContext(r.Context(), `
+		SELECT host_id, count(*)::bigint
+		FROM v_burn_usage_rated
+		GROUP BY host_id
+		ORDER BY host_id
+	`)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+
+	out := []map[string]any{}
+	for rows.Next() {
+		var machine string
+		var sources int64
+		if err := rows.Scan(&machine, &sources); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		out = append(out, map[string]any{"machine": machine, "sources": sources})
 	}
 	writeJSON(w, 200, out)
 }
