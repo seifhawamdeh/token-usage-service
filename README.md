@@ -151,7 +151,7 @@ Source identity includes the host, adapter, and source path. Reprocessing update
 
 ## Scheduling
 
-Use the included [systemd user service and hourly timer](deploy/systemd/README.md). Follow the installation guide and update the service's `WorkingDirectory` and `EnvironmentFile` to match your clone before enabling it.
+Use the included [systemd user service and 12-hour timer](deploy/systemd/README.md). Follow the installation guide and update the service's `WorkingDirectory` and `EnvironmentFile` to match your clone before enabling it.
 
 After installing the units:
 

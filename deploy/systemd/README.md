@@ -1,6 +1,6 @@
 # systemd user timer
 
-Hourly one-shot ingest without a resident daemon.
+One-shot ingest every 12 hours without a resident daemon.
 
 ## Install
 

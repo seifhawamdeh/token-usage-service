@@ -1,8 +1,8 @@
 [Unit]
-Description=Hourly token usage burn ingest timer
+Description=Token usage burn ingest timer (every 12 hours)
 
 [Timer]
-OnCalendar=hourly
+OnCalendar=*-*-* 00,12:00:00
 Persistent=true
 RandomizedDelaySec=120
 
