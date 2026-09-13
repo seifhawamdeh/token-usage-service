@@ -92,11 +92,17 @@ type envelope struct {
 }
 
 type sessionMeta struct {
-	SessionID     string `json:"session_id"`
-	ID            string `json:"id"`
-	CWD           string `json:"cwd"`
-	ModelProvider string `json:"model_provider"`
-	Timestamp     string `json:"timestamp"`
+	SessionID     string      `json:"session_id"`
+	ID            string      `json:"id"`
+	CWD           string      `json:"cwd"`
+	ModelProvider string      `json:"model_provider"`
+	Timestamp     string      `json:"timestamp"`
+	Git           *sessionGit `json:"git"`
+}
+
+type sessionGit struct {
+	RepositoryURL string `json:"repository_url"`
+	Branch        string `json:"branch"`
 }
 
 type eventMsg struct {
@@ -129,10 +135,10 @@ func (a *Adapter) Parse(_ context.Context, src model.SourceDescriptor) model.Par
 	defer f.Close()
 
 	var (
-		sessionID, cwd, modelProvider, lastModel string
-		models                                   = map[string]struct{}{}
-		startedAt, lastAt                        *time.Time
-		usageEvents                              int
+		sessionID, cwd, modelProvider, lastModel, gitRemoteURL string
+		models                                                 = map[string]struct{}{}
+		startedAt, lastAt                                      *time.Time
+		usageEvents                                            int
 
 		// Codex's total_token_usage is cumulative within a segment but resets
 		// to near-zero when the context is compacted. To recover the true
@@ -224,6 +230,9 @@ func (a *Adapter) Parse(_ context.Context, src model.SourceDescriptor) model.Par
 			if p.ModelProvider != "" {
 				modelProvider = p.ModelProvider
 			}
+			if p.Git != nil && p.Git.RepositoryURL != "" {
+				gitRemoteURL = p.Git.RepositoryURL
+			}
 			if ts := parseTime(p.Timestamp); ts != nil && startedAt == nil {
 				startedAt = ts
 			}
@@ -289,6 +298,7 @@ func (a *Adapter) Parse(_ context.Context, src model.SourceDescriptor) model.Par
 		StableID:          stable,
 		ProviderSessionID: sessionID,
 		CWD:               cwd,
+		GitRemoteURL:      gitRemoteURL,
 		StartedAt:         startedAt,
 		LastEventAt:       lastAt,
 		Model:             lastModel,

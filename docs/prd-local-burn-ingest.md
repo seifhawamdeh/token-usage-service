@@ -119,3 +119,8 @@ Operators need a durable answer to **“what did agent CLIs burn on this machine
 - Cursor sessions vs cursor-usage CSV are separate facts; Antigravity uses protobuf self-check
 
 Open / deferred: Git sink, cross-source dedup, Cursor session↔usage join, exact exit-code taxonomy polish.
+
+- `project_cwds` keyed by `(host_id, cwd)`, not `cwd` alone — a cwd string isn't unique across machines (2026-09-14)
+- Adapters return `ParseResult{Skip: true}` for sources with no real usage/message content (empty antigravity `gen_metadata`, claude-code `bridge-session`-only stubs) instead of writing an all-null snapshot (2026-09-14)
+- Day-bucketing timezone offset is configurable (`DASHBOARD_DAY_OFFSET_HOURS`), not hardcoded UTC+3 (2026-09-14)
+- Git remote URLs normalized before storage (strip `.git`, SSH→https form) so adapters that read a remote differently still resolve to one `project_remotes` row (2026-09-14)

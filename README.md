@@ -78,8 +78,12 @@ go run ./cmd/dashboard
 ```
 
 Optional: `DASHBOARD_ADDR=:9090`. Uses the same `DATABASE_URL` / `.env` as ingest.
-Use the machine selector to filter every dashboard total, chart, model, and
-snapshot by `HOST_ID`.
+
+Tabs: **Home** (totals, by-vendor/model/project breakdowns), **Daily**
+(per-day chart with drill-down into that day's snapshots), **Machines**
+(per-host snapshot counts and last sync time), and **Configs** (map a
+Git remote or work directory to a project name). The machine and project
+selectors filter every total, chart, and snapshot list.
 
 ## Supported sources
 
@@ -119,6 +123,7 @@ The CLI loads `.env` from its current working directory. Existing environment va
 | `ENABLED_VENDORS` | Comma-separated adapter names | `claude-code` |
 | `SINK` | Storage backend | `postgres`, the only implemented sink |
 | `CURSOR_USAGE_REPORTS_DIR` | Directory containing exports | `cursor-usage-reports`, relative to the working directory |
+| `DASHBOARD_DAY_OFFSET_HOURS` | Hours added to UTC before bucketing snapshots into calendar days on the dashboard | `3` |
 
 The supplied `.env.example` enables all adapters; narrow that list during setup. Source-path overrides and the Copilot legacy-billing switch are listed in [`.env.example`](.env.example).
 
@@ -149,7 +154,9 @@ The summary reports scanned, unchanged, parsed, upserted, deferred, and failed s
 | --- | --- |
 | `burn_snapshots` | Latest per-source usage, model metadata, nullable token counts, and optional reported cost |
 | `burn_checkpoints` | Source comparison values and processing signature |
-| `path_remotes` | Source paths, repository roots, and discovered Git remotes |
+| `path_remotes` | Source paths, repository roots, and discovered Git remotes (normalized: SSH/`.git` forms collapse to one URL) |
+| `project_remotes` | Git remote URL → project name, user-mapped in the dashboard's Configs tab |
+| `project_cwds` | `(host_id, work directory)` → project name, user-mapped in the dashboard's Configs tab |
 | `model_costs` | USD-per-1M-token rate card by `model_key` with dated `[effective_from, effective_to)` periods |
 | `model_cost_aliases` | Vendor/display labels → `model_key` |
 

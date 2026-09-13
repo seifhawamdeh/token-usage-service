@@ -18,7 +18,7 @@ import (
 
 const (
 	VendorName = "antigravity"
-	Version    = "1"
+	Version    = "2"
 )
 
 // Adapter reads Antigravity CLI conversation SQLite DBs and decodes
@@ -132,6 +132,10 @@ func (a *Adapter) Parse(ctx context.Context, src model.SourceDescriptor) model.P
 	}
 	if err := rows.Err(); err != nil {
 		return model.ParseResult{Error: err}
+	}
+
+	if !agg.haveIn && !agg.haveOut && !agg.haveCR && !agg.haveReason && agg.started == nil {
+		return model.ParseResult{Skip: true, Warning: "no gen_metadata usage"}
 	}
 
 	modelList := make([]string, 0, len(agg.models))

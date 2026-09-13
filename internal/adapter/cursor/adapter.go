@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +19,7 @@ import (
 
 const (
 	VendorName = "cursor"
-	Version    = "2"
+	Version    = "3"
 )
 
 // Adapter reads Cursor global state.vscdb composer sessions.
@@ -28,8 +29,9 @@ const (
 // exports). Local bubble tokenCount is almost always zero and must not be
 // treated as billed usage.
 type Adapter struct {
-	StateDB         string
-	TranscriptsRoot string // optional; default ~/.cursor/projects
+	StateDB              string
+	TranscriptsRoot      string // optional; default ~/.cursor/projects
+	WorkspaceStorageRoot string // optional; default sibling of StateDB's User dir
 }
 
 func New(stateDB string) *Adapter {
@@ -38,10 +40,39 @@ func New(stateDB string) *Adapter {
 		stateDB = filepath.Join(home, ".config", "Cursor", "User", "globalStorage", "state.vscdb")
 	}
 	home, _ := os.UserHomeDir()
+	// state.vscdb lives at .../User/globalStorage/state.vscdb; workspaceStorage
+	// is a sibling of globalStorage under the same User dir.
+	userDir := filepath.Dir(filepath.Dir(stateDB))
 	return &Adapter{
-		StateDB:         stateDB,
-		TranscriptsRoot: filepath.Join(home, ".cursor", "projects"),
+		StateDB:              stateDB,
+		TranscriptsRoot:      filepath.Join(home, ".cursor", "projects"),
+		WorkspaceStorageRoot: filepath.Join(userDir, "workspaceStorage"),
 	}
+}
+
+// workspaceFolder reads the real workspace folder path for a given
+// workspaceID from Cursor's workspaceStorage/<id>/workspace.json. This is the
+// exact path the user opened, unlike the project-slug guessed from the
+// transcript path (which can be lossy/ambiguous for nested or renamed dirs).
+func (a *Adapter) workspaceFolder(workspaceID string) string {
+	if workspaceID == "" || a.WorkspaceStorageRoot == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(a.WorkspaceStorageRoot, workspaceID, "workspace.json"))
+	if err != nil {
+		return ""
+	}
+	var meta struct {
+		Folder string `json:"folder"`
+	}
+	if err := json.Unmarshal(data, &meta); err != nil || meta.Folder == "" {
+		return ""
+	}
+	u, err := url.Parse(meta.Folder)
+	if err != nil || u.Scheme != "file" {
+		return meta.Folder
+	}
+	return u.Path
 }
 
 func (a *Adapter) Name() string    { return VendorName }
@@ -57,20 +88,20 @@ func (a *Adapter) openRO() (*sql.DB, error) {
 }
 
 type composerSession struct {
-	id               string
-	workspaceID      string
-	createdAt        int64
-	updatedAt        int64
-	bubbles          int
-	positiveBubbles  int
-	models           map[string]struct{}
-	lastModel        string
-	transcriptPath   string
-	localInput       int64
-	localOutput      int64
-	localCacheRead   int64
-	localCacheWrite  int64
-	haveLocalTokens  bool
+	id              string
+	workspaceID     string
+	createdAt       int64
+	updatedAt       int64
+	bubbles         int
+	positiveBubbles int
+	models          map[string]struct{}
+	lastModel       string
+	transcriptPath  string
+	localInput      int64
+	localOutput     int64
+	localCacheRead  int64
+	localCacheWrite int64
+	haveLocalTokens bool
 }
 
 func (a *Adapter) Discover(ctx context.Context) ([]model.SourceDescriptor, error) {
@@ -157,8 +188,8 @@ func (a *Adapter) Parse(ctx context.Context, src model.SourceDescriptor) model.P
 		updated = &t
 	}
 
-	cwd := ""
-	if s.transcriptPath != "" {
+	cwd := a.workspaceFolder(s.workspaceID)
+	if cwd == "" && s.transcriptPath != "" {
 		// .../projects/<project-slug>/agent-transcripts/<uuid>/<uuid>.jsonl
 		parts := strings.Split(filepath.ToSlash(s.transcriptPath), "/")
 		for i, p := range parts {

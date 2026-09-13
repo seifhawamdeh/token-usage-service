@@ -15,7 +15,7 @@ import (
 
 const (
 	VendorName = "claude-code"
-	Version    = "4"
+	Version    = "6"
 )
 
 type Adapter struct {
@@ -206,10 +206,12 @@ type usageObj struct {
 }
 
 type lineObj struct {
-	Type    string `json:"type"`
-	CWD     string `json:"cwd"`
-	Session string `json:"sessionId"`
-	Message *struct {
+	Type      string `json:"type"`
+	CWD       string `json:"cwd"`
+	GitBranch string `json:"gitBranch"`
+	AiTitle   string `json:"aiTitle"`
+	Session   string `json:"sessionId"`
+	Message   *struct {
 		ID    string    `json:"id"`
 		Model string    `json:"model"`
 		Usage *usageObj `json:"usage"`
@@ -234,18 +236,19 @@ func (a *Adapter) parseTranscript(src model.SourceDescriptor) model.ParseResult 
 	defer f.Close()
 
 	var (
-		cwd, session, lastModel string
-		models                  = map[string]struct{}{}
-		startedAt, lastAt       *time.Time
-		rawAssistantLines       int
+		cwd, session, lastModel, gitBranch, aiTitle string
+		models                                      = map[string]struct{}{}
+		startedAt, lastAt                           *time.Time
+		rawAssistantLines                           int
 		// Claude Code writes one line per streamed chunk of an assistant
 		// message, all sharing the same message.id and re-reporting the same
 		// input/cache usage (only output grows as the stream completes).
 		// Dedupe by id and keep the last (most complete) usage per message
 		// before summing, or every raw chunk's input/cache tokens get
 		// counted once per chunk instead of once per message.
-		byMessage = map[string]*usageObj{}
-		noIDSeq   int
+		byMessage  = map[string]*usageObj{}
+		noIDSeq    int
+		sawMessage bool
 	)
 
 	sc := bufio.NewScanner(f)
@@ -272,11 +275,20 @@ func (a *Adapter) parseTranscript(src model.SourceDescriptor) model.ParseResult 
 		if o.Session != "" {
 			session = o.Session
 		}
+		if o.GitBranch != "" {
+			gitBranch = o.GitBranch
+		}
+		if o.AiTitle != "" {
+			aiTitle = o.AiTitle
+		}
 		if ts := parseTime(o.Timestamp); ts != nil {
 			if startedAt == nil {
 				startedAt = ts
 			}
 			lastAt = ts
+		}
+		if o.Type == "user" || o.Type == "assistant" {
+			sawMessage = true
 		}
 		if o.Type != "assistant" || o.Message == nil || o.Message.Usage == nil {
 			continue
@@ -335,16 +347,27 @@ func (a *Adapter) parseTranscript(src model.SourceDescriptor) model.ParseResult 
 	}
 	msgCount := len(byMessage)
 
+	if !sawMessage {
+		return model.ParseResult{Skip: true, Warning: "no_messages_in_transcript"}
+	}
+
 	modelList := make([]string, 0, len(models))
 	for m := range models {
 		modelList = append(modelList, m)
 	}
-	detail, _ := json.Marshal(map[string]any{
+	detailMap := map[string]any{
 		"assistant_usage_messages": msgCount,
 		"raw_assistant_lines":      rawAssistantLines,
 		"aggregation":              "sum_assistant_message_usage_deduped_by_message_id",
 		"cache_write_windows":      "ephemeral_5m_and_1h_when_present",
-	})
+	}
+	if gitBranch != "" {
+		detailMap["git_branch"] = gitBranch
+	}
+	if aiTitle != "" {
+		detailMap["ai_title"] = aiTitle
+	}
+	detail, _ := json.Marshal(detailMap)
 
 	snap := &model.BurnSnapshot{
 		Vendor:            VendorName,
@@ -378,15 +401,15 @@ func (a *Adapter) parseTranscript(src model.SourceDescriptor) model.ParseResult 
 
 // jobState mirrors the fields we care about in ~/.claude/jobs/*/state.json.
 type jobState struct {
-	Tokens       *int64  `json:"tokens"`         // single integer — no breakdown
-	SessionID    string  `json:"sessionId"`
-	CWD          string  `json:"cwd"`
-	Name         string  `json:"name"`
-	Intent       string  `json:"intent"`
-	State        string  `json:"state"`
-	CreatedAt    string  `json:"createdAt"`
-	UpdatedAt    string  `json:"updatedAt"`
-	LinkScanPath string  `json:"linkScanPath"`
+	Tokens       *int64   `json:"tokens"` // single integer — no breakdown
+	SessionID    string   `json:"sessionId"`
+	CWD          string   `json:"cwd"`
+	Name         string   `json:"name"`
+	Intent       string   `json:"intent"`
+	State        string   `json:"state"`
+	CreatedAt    string   `json:"createdAt"`
+	UpdatedAt    string   `json:"updatedAt"`
+	LinkScanPath string   `json:"linkScanPath"`
 	RespawnFlags []string `json:"respawnFlags"`
 }
 
@@ -445,7 +468,7 @@ func (a *Adapter) parseJobState(src model.SourceDescriptor) model.ParseResult {
 		LastEventAt:       lastAt,
 		Model:             jobModel,
 		Models:            models,
-		ModelProvider:      "anthropic",
+		ModelProvider:     "anthropic",
 		Tokens: model.Tokens{
 			Total: &total,
 			// Input, Output, CacheRead, CacheWrite left nil — state.json

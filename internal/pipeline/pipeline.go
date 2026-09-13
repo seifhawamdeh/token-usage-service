@@ -113,7 +113,7 @@ func (r *Runner) Run(ctx context.Context) (Summary, error) {
 			}
 			sum.Upserted++
 
-			pr := pathremote.ResolveFromCWD(r.HostID, src.SourcePath, snap.CWD)
+			pr := pathremote.ResolveWithKnownRemote(r.HostID, src.SourcePath, snap.CWD, snap.GitRemoteURL)
 			if err := r.Sink.UpsertPathRemote(ctx, pr); err != nil {
 				return sum, fmt.Errorf("path remote: %w", err)
 			}

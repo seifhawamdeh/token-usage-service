@@ -103,3 +103,22 @@ func TestParseSumsSegmentPeaksAcrossCompactionResets(t *testing.T) {
 		t.Fatalf("cwd=%s", res.Snapshot.CWD)
 	}
 }
+
+func TestParseExtractsGitRemoteURLFromSessionMeta(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rollout-test.jsonl")
+	content := `{"type":"session_meta","timestamp":"2026-09-09T20:00:00Z","payload":{"session_id":"sess-1","cwd":"/tmp/proj","model_provider":"openai","git":{"branch":"main","repository_url":"https://github.com/seifhawamdeh/zelyx-agent"}}}
+{"type":"event_msg","timestamp":"2026-09-09T20:00:30Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ad := codex.New(dir)
+	res := ad.Parse(context.Background(), model.SourceDescriptor{SourcePath: path, StableID: path})
+	if res.Error != nil {
+		t.Fatal(res.Error)
+	}
+	if res.Snapshot.GitRemoteURL != "https://github.com/seifhawamdeh/zelyx-agent" {
+		t.Fatalf("git_remote_url=%q", res.Snapshot.GitRemoteURL)
+	}
+}

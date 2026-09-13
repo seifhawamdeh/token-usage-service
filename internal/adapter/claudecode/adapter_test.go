@@ -51,6 +51,36 @@ func TestParseSumsAssistantUsage(t *testing.T) {
 	}
 }
 
+func TestParseExtractsGitBranchAndAiTitle(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	content := `{"type":"user","cwd":"/home/user/project","gitBranch":"feature/foo","message":{}}
+{"type":"assistant","gitBranch":"feature/foo","aiTitle":"Fix login redirect bug","message":{"model":"claude-opus","usage":{"input_tokens":1,"output_tokens":1}}}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ad := claudecode.New(dir, "")
+	res := ad.Parse(context.Background(), model.SourceDescriptor{
+		Vendor:     "claude-code",
+		SourcePath: path,
+		StableID:   path,
+	})
+	if res.Error != nil {
+		t.Fatal(res.Error)
+	}
+	var detail map[string]any
+	if err := json.Unmarshal(res.Snapshot.UsageDetail, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail["git_branch"] != "feature/foo" {
+		t.Fatalf("git_branch=%v", detail["git_branch"])
+	}
+	if detail["ai_title"] != "Fix login redirect bug" {
+		t.Fatalf("ai_title=%v", detail["ai_title"])
+	}
+}
+
 func TestParseCacheCreationWindows(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cache.jsonl")
