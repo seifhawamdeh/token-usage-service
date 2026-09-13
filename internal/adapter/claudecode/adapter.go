@@ -15,25 +15,52 @@ import (
 
 const (
 	VendorName = "claude-code"
-	Version    = "3"
+	Version    = "4"
 )
 
 type Adapter struct {
 	ProjectsRoot string
+	JobsRoot     string
 }
 
-func New(projectsRoot string) *Adapter {
+func New(projectsRoot, jobsRoot string) *Adapter {
+	home, _ := os.UserHomeDir()
 	if projectsRoot == "" {
-		home, _ := os.UserHomeDir()
 		projectsRoot = filepath.Join(home, ".claude", "projects")
 	}
-	return &Adapter{ProjectsRoot: projectsRoot}
+	if jobsRoot == "" {
+		jobsRoot = filepath.Join(home, ".claude", "jobs")
+	}
+	return &Adapter{ProjectsRoot: projectsRoot, JobsRoot: jobsRoot}
 }
 
 func (a *Adapter) Name() string    { return VendorName }
 func (a *Adapter) Version() string { return Version }
 
 func (a *Adapter) Discover(ctx context.Context) ([]model.SourceDescriptor, error) {
+	out, err := a.discoverProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Collect the set of project .jsonl paths so we can skip jobs that
+	// are already covered by a transcript file.
+	projectPaths := make(map[string]struct{}, len(out))
+	for _, sd := range out {
+		projectPaths[sd.SourcePath] = struct{}{}
+	}
+
+	orphans, err := a.discoverOrphanJobs(ctx, projectPaths)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, orphans...)
+
+	return out, nil
+}
+
+// discoverProjects walks ~/.claude/projects/**/*.jsonl (the existing logic).
+func (a *Adapter) discoverProjects(ctx context.Context) ([]model.SourceDescriptor, error) {
 	root := a.ProjectsRoot
 	fi, err := os.Stat(root)
 	if err != nil {
@@ -82,6 +109,88 @@ func (a *Adapter) Discover(ctx context.Context) ([]model.SourceDescriptor, error
 	return out, err
 }
 
+// discoverOrphanJobs scans ~/.claude/jobs/*/state.json for background jobs
+// whose transcript .jsonl either doesn't exist or was never written. These
+// are jobs that would otherwise be invisible to the pipeline.
+func (a *Adapter) discoverOrphanJobs(ctx context.Context, projectPaths map[string]struct{}) ([]model.SourceDescriptor, error) {
+	root := a.JobsRoot
+	fi, err := os.Stat(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !fi.IsDir() {
+		return nil, nil
+	}
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, fmt.Errorf("read claude jobs dir: %w", err)
+	}
+
+	var out []model.SourceDescriptor
+	for _, e := range entries {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+		if !e.IsDir() {
+			continue
+		}
+		statePath := filepath.Join(root, e.Name(), "state.json")
+		info, err := os.Stat(statePath)
+		if err != nil {
+			continue // no state.json in this directory
+		}
+
+		// Quick-read linkScanPath to decide if this job is already
+		// covered by a project transcript.
+		data, err := os.ReadFile(statePath)
+		if err != nil {
+			continue
+		}
+		var probe struct {
+			LinkScanPath string `json:"linkScanPath"`
+		}
+		if err := json.Unmarshal(data, &probe); err != nil {
+			continue
+		}
+
+		// If the linked .jsonl exists among discovered project paths,
+		// the main project walk already covers this job — skip it.
+		if probe.LinkScanPath != "" {
+			absLink, _ := filepath.Abs(probe.LinkScanPath)
+			if _, covered := projectPaths[absLink]; covered {
+				continue
+			}
+			// Also check if the file exists on disk even if not in
+			// projectPaths (defensive — could happen if projects root
+			// was overridden).
+			if _, err := os.Stat(probe.LinkScanPath); err == nil {
+				continue
+			}
+		}
+
+		abs, err := filepath.Abs(statePath)
+		if err != nil {
+			abs = statePath
+		}
+		out = append(out, model.SourceDescriptor{
+			Vendor:     VendorName,
+			SourcePath: abs,
+			StableID:   abs,
+			MtimeNs:    info.ModTime().UnixNano(),
+			SizeBytes:  info.Size(),
+		})
+	}
+	return out, nil
+}
+
+// ---------- JSONL transcript parsing (unchanged) ----------
+
 type usageObj struct {
 	InputTokens              *int64 `json:"input_tokens"`
 	OutputTokens             *int64 `json:"output_tokens"`
@@ -109,6 +218,15 @@ type lineObj struct {
 }
 
 func (a *Adapter) Parse(_ context.Context, src model.SourceDescriptor) model.ParseResult {
+	// Dispatch: state.json files get the job parser; .jsonl files get the
+	// transcript parser.
+	if filepath.Base(src.SourcePath) == "state.json" {
+		return a.parseJobState(src)
+	}
+	return a.parseTranscript(src)
+}
+
+func (a *Adapter) parseTranscript(src model.SourceDescriptor) model.ParseResult {
 	f, err := os.Open(src.SourcePath)
 	if err != nil {
 		return model.ParseResult{Error: err}
@@ -255,6 +373,93 @@ func (a *Adapter) Parse(_ context.Context, src model.SourceDescriptor) model.Par
 	}
 	return model.ParseResult{Snapshot: snap}
 }
+
+// ---------- Orphan job state.json parsing ----------
+
+// jobState mirrors the fields we care about in ~/.claude/jobs/*/state.json.
+type jobState struct {
+	Tokens       *int64  `json:"tokens"`         // single integer — no breakdown
+	SessionID    string  `json:"sessionId"`
+	CWD          string  `json:"cwd"`
+	Name         string  `json:"name"`
+	Intent       string  `json:"intent"`
+	State        string  `json:"state"`
+	CreatedAt    string  `json:"createdAt"`
+	UpdatedAt    string  `json:"updatedAt"`
+	LinkScanPath string  `json:"linkScanPath"`
+	RespawnFlags []string `json:"respawnFlags"`
+}
+
+func (a *Adapter) parseJobState(src model.SourceDescriptor) model.ParseResult {
+	data, err := os.ReadFile(src.SourcePath)
+	if err != nil {
+		return model.ParseResult{Error: err}
+	}
+	var js jobState
+	if err := json.Unmarshal(data, &js); err != nil {
+		return model.ParseResult{
+			Error:   fmt.Errorf("malformed state.json: %w", err),
+			Warning: "malformed_record",
+		}
+	}
+
+	// If there are no tokens recorded at all, skip — nothing to count.
+	if js.Tokens == nil || *js.Tokens == 0 {
+		return model.ParseResult{Skip: true, Warning: "no_tokens_in_job_state"}
+	}
+
+	startedAt := parseTime(js.CreatedAt)
+	lastAt := parseTime(js.UpdatedAt)
+
+	// Try to extract model from respawnFlags (e.g. ["--model", "sonnet"]).
+	var jobModel string
+	for i, flag := range js.RespawnFlags {
+		if flag == "--model" && i+1 < len(js.RespawnFlags) {
+			jobModel = js.RespawnFlags[i+1]
+			break
+		}
+	}
+
+	var models []string
+	if jobModel != "" {
+		models = []string{jobModel}
+	}
+
+	total := *js.Tokens
+	detail, _ := json.Marshal(map[string]any{
+		"source":            "job_state",
+		"job_state":         js.State,
+		"job_name":          js.Name,
+		"aggregation":       "total_from_state_json",
+		"breakdown":         "unavailable",
+		"linked_transcript": js.LinkScanPath,
+	})
+
+	snap := &model.BurnSnapshot{
+		Vendor:            VendorName,
+		SourcePath:        src.SourcePath,
+		StableID:          src.StableID,
+		ProviderSessionID: js.SessionID,
+		CWD:               js.CWD,
+		StartedAt:         startedAt,
+		LastEventAt:       lastAt,
+		Model:             jobModel,
+		Models:            models,
+		ModelProvider:      "anthropic",
+		Tokens: model.Tokens{
+			Total: &total,
+			// Input, Output, CacheRead, CacheWrite left nil — state.json
+			// provides only an aggregate integer with no breakdown.
+		},
+		UsageDetail:       detail,
+		AdapterVersion:    Version,
+		SnapshotSchemaVer: model.SnapshotSchemaVersion,
+		ParseStatus:       "partial",
+	}
+	return model.ParseResult{Snapshot: snap}
+}
+
+// ---------- helpers ----------
 
 func ptrIf(ok bool, v int64) *int64 {
 	if !ok {

@@ -119,7 +119,7 @@ func buildAdapters(cfg *config.Config) ([]adapter.VendorAdapter, error) {
 	for _, name := range cfg.EnabledVendors {
 		switch name {
 		case "claude-code":
-			out = append(out, claudecode.New(cfg.ClaudeProjectsRoot))
+			out = append(out, claudecode.New(cfg.ClaudeProjectsRoot, cfg.ClaudeJobsRoot))
 		case "codex":
 			out = append(out, codex.New(cfg.CodexRoot))
 		case "opencode":

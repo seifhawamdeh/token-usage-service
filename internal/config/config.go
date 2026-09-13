@@ -14,6 +14,7 @@ type Config struct {
 	EnabledVendors        []string
 	Sink                  string
 	ClaudeProjectsRoot    string
+	ClaudeJobsRoot        string
 	CodexRoot             string
 	OpenCodeDBPath        string
 	CopilotDBPath         string
@@ -37,6 +38,7 @@ func Load(envFiles ...string) (*Config, error) {
 		HostID:                firstEnv("HOST_ID", "HOST"),
 		Sink:                  strings.ToLower(firstEnv("SINK", "TOKEN_USAGE_SINK")),
 		ClaudeProjectsRoot:    firstEnv("CLAUDE_PROJECTS_ROOT"),
+		ClaudeJobsRoot:        firstEnv("CLAUDE_JOBS_ROOT"),
 		CodexRoot:             firstEnv("CODEX_ROOT", "CODEX_SESSIONS_ROOT"),
 		OpenCodeDBPath:        firstEnv("OPENCODE_DB_PATH"),
 		CopilotDBPath:         firstEnv("COPILOT_DB_PATH"),
