@@ -80,3 +80,25 @@ type ParseResult struct {
 	Warning string
 	Error   error
 }
+
+// IngestRun captures one complete pipeline invocation for operational health.
+type IngestRun struct {
+	HostID            string
+	Status            string
+	Scanned           int
+	UnchangedSkipped  int
+	Parsed            int
+	Upserted          int
+	Skipped           int
+	Deferred          int
+	Errors            int
+	PathRemotesUpsert int
+	FatalError        string
+}
+
+type IngestIssue struct {
+	Vendor     string
+	SourcePath string
+	Severity   string
+	Message    string
+}

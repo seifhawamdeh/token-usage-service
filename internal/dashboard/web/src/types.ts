@@ -73,6 +73,19 @@ export interface Snapshot {
   ingested_at: string;
 }
 
+export interface LedgerEntry {
+  id: number;
+  machine: string;
+  vendor: string;
+  model: string;
+  source_path: string;
+  project: string;
+  occurred_at: string;
+  delta_tokens_input: number | null;
+  delta_tokens_output: number | null;
+  delta_rated_cost_usd: number | null;
+}
+
 export interface Remote {
   remote_url: string;
   project: string | null;
@@ -90,4 +103,30 @@ export interface Machine {
   machine: string;
   sources: number;
   last_sync_at: string | null;
+}
+
+export interface IngestIssue {
+  vendor: string;
+  source_path: string | null;
+  severity: "error" | "warning";
+  message: string;
+  created_at: string;
+}
+
+export interface IngestHealth {
+  status: "ok" | "degraded" | "failed" | "running" | "no_runs";
+  last_run: {
+    machine: string;
+    started_at: string;
+    completed_at: string | null;
+    scanned: number;
+    unchanged_skipped: number;
+    parsed: number;
+    upserted: number;
+    skipped: number;
+    deferred: number;
+    errors: number;
+    fatal_error: string | null;
+  } | null;
+  issues: IngestIssue[];
 }

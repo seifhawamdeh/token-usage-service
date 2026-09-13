@@ -3,7 +3,7 @@
 The repository contains two executables with different service models:
 
 - `token-usage-ingest` performs one collection pass and exits. Run it from an
-  operating-system scheduler every 12 hours.
+  operating-system scheduler every 30 minutes.
 - `token-usage-dashboard` is a long-running HTTP server. Install it as a
   startup service only when the dashboard must remain available.
 

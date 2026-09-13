@@ -15,7 +15,7 @@ A Go CLI that collects provider-reported usage from agent transcripts, local dat
 Discover enabled sources → Compare checkpoints → Parse changed sources → Upsert → Exit
 ```
 
-Each invocation completes one pass. Snapshots and checkpoints live in PostgreSQL; an external scheduler controls the next run. Discovery work varies by adapter—database and CSV adapters may read contents while discovering sources.
+Each invocation completes one pass. Latest snapshots, checkpoints, and an append-only usage-delta ledger live in PostgreSQL; an external scheduler controls the next run. Discovery work varies by adapter—database and CSV adapters may read contents while discovering sources.
 
 Missing token values remain `null`. Vendors may embed `provider_cost`; optional **list-price** USD is computed in `v_burn_usage_rated` from the `model_costs` catalog — see [cost and accuracy](docs/cost-and-accuracy.md).
 
@@ -70,7 +70,7 @@ scanned=12 unchanged_skipped=12 parsed=0 upserted=0 deferred=0 errors=0 path_rem
 
 ## Dashboard
 
-Local read-only UI over Postgres (`v_burn_usage_rated` + snapshots):
+Local UI over Postgres (`v_burn_usage_rated`, snapshots, ledger, and ingest health):
 
 ```bash
 go run ./cmd/dashboard
@@ -146,13 +146,15 @@ go build -o ~/.local/bin/token-usage-ingest ./cmd/ingest
 
 Run from the directory containing `.env`, or supply configuration through environment variables.
 
-The summary reports scanned, unchanged, parsed, upserted, deferred, and failed sources. Per-source parse errors can still produce exit code `0`; inspect `errors` and `deferred` when checking coverage. Configuration errors return `2`; database and fatal ingestion failures return `3`.
+The summary reports scanned, unchanged, parsed, upserted, skipped, deferred, and failed sources. `skipped` means a source has no supported usage fields; it is not a parse failure. Per-source parse errors can still produce exit code `0`; inspect `errors` and `deferred` when checking coverage. Configuration errors return `2`; database and fatal ingestion failures return `3`.
 
 ## Storage and accounting
 
 | Table | Contents |
 | --- | --- |
 | `burn_snapshots` | Latest per-source usage, model metadata, nullable token counts, and optional reported cost |
+| `burn_usage_ledger` | Immutable snapshot revisions and token/cost deltas; powers daily burn trends after migration |
+| `burn_ingest_runs` / `burn_ingest_issues` | Per-run status, counters, and parser or adapter warnings/errors |
 | `burn_checkpoints` | Source comparison values and processing signature |
 | `path_remotes` | Source paths, repository roots, and discovered Git remotes (normalized: SSH/`.git` forms collapse to one URL) |
 | `project_remotes` | Git remote URL → project name, user-mapped in the dashboard's Configs tab |
@@ -164,7 +166,7 @@ Query **`v_burn_usage_rated`** for snapshots plus `rated_cost_usd`. Details: cat
 
 Source identity includes the host, adapter, and source path. Reprocessing updates the existing snapshot for that identity. Adapter and schema versions participate in checkpoint comparison.
 
-**Snapshots represent individual sources, not exact deduplicated machine-wide totals.** Copies, branches, resumed files, and overlapping exports can repeat usage. Cross-source deduplication is not implemented. Missing values mean unknown usage, not zero consumption.
+**Snapshots represent individual sources, not exact deduplicated machine-wide totals.** Copies, branches, resumed files, and overlapping exports can repeat usage. Cross-source deduplication is not implemented. Missing values mean unknown usage, not zero consumption. The ledger begins at migration time; a source's first recorded revision contributes its current cumulative total, and later revisions contribute deltas.
 
 ## Scheduling
 

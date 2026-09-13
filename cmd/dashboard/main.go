@@ -51,6 +51,7 @@ func main() {
 	api := &dashboard.API{DB: db, DayOffset: dayOffset}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", api.Health)
+	mux.HandleFunc("GET /api/ingest-health", api.IngestHealth)
 	mux.HandleFunc("GET /api/machines", api.Machines)
 	mux.HandleFunc("GET /api/projects", api.Projects)
 	mux.HandleFunc("GET /api/remotes", api.Remotes)
@@ -63,6 +64,7 @@ func main() {
 	mux.HandleFunc("GET /api/by-project", api.ByProject)
 	mux.HandleFunc("GET /api/daily", api.Daily)
 	mux.HandleFunc("GET /api/snapshots", api.Snapshots)
+	mux.HandleFunc("GET /api/ledger", api.Ledger)
 	mux.Handle("/", dashboard.StaticHandler())
 
 	network := "tcp"

@@ -16,3 +16,11 @@ type Sink interface {
 	// UpsertPathRemote writes the path↔remote mapping (separate table).
 	UpsertPathRemote(ctx context.Context, pr model.PathRemote) error
 }
+
+// RunRecorder is optional so future sinks can implement the ingest pipeline
+// without also becoming an operational database.
+type RunRecorder interface {
+	StartRun(ctx context.Context, hostID string) (int64, error)
+	FinishRun(ctx context.Context, runID int64, run model.IngestRun) error
+	RecordRunIssue(ctx context.Context, runID int64, issue model.IngestIssue) error
+}

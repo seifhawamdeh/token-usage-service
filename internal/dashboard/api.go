@@ -41,6 +41,63 @@ func (a *API) Health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// IngestHealth exposes the latest run and its parser/adapter issues.
+func (a *API) IngestHealth(w http.ResponseWriter, r *http.Request) {
+	machine := r.URL.Query().Get("machine")
+	row := a.DB.QueryRowContext(r.Context(), `
+		SELECT id, host_id, started_at, completed_at, status, scanned, unchanged_skipped,
+			parsed, upserted, skipped, deferred, errors, path_remotes_upserted, fatal_error
+		FROM burn_ingest_runs WHERE ($1 = '' OR host_id = $1)
+		ORDER BY started_at DESC LIMIT 1`, machine)
+	var id int64
+	var hostID, status string
+	var startedAt time.Time
+	var completedAt sql.NullTime
+	var scanned, unchanged, parsed, upserted, skipped, deferred, errors, remotes int
+	var fatal sql.NullString
+	if err := row.Scan(&id, &hostID, &startedAt, &completedAt, &status, &scanned, &unchanged, &parsed, &upserted, &skipped, &deferred, &errors, &remotes, &fatal); err != nil {
+		if err == sql.ErrNoRows {
+			writeJSON(w, 200, map[string]any{"status": "no_runs", "last_run": nil, "issues": []any{}})
+			return
+		}
+		writeErr(w, 500, err.Error())
+		return
+	}
+	issues, err := a.runIssues(r.Context(), id)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"status": status,
+		"last_run": map[string]any{
+			"id": id, "machine": hostID, "started_at": startedAt.UTC().Format(time.RFC3339), "completed_at": nullTime(completedAt),
+			"scanned": scanned, "unchanged_skipped": unchanged, "parsed": parsed, "upserted": upserted, "skipped": skipped,
+			"deferred": deferred, "errors": errors, "path_remotes_upserted": remotes, "fatal_error": nullString(fatal),
+		}, "issues": issues,
+	})
+}
+
+func (a *API) runIssues(ctx context.Context, runID int64) ([]map[string]any, error) {
+	rows, err := a.DB.QueryContext(ctx, `SELECT vendor, source_path, severity, message, created_at
+		FROM burn_ingest_issues WHERE run_id = $1 ORDER BY id DESC LIMIT 20`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var vendor, severity, message string
+		var sourcePath sql.NullString
+		var createdAt time.Time
+		if err := rows.Scan(&vendor, &sourcePath, &severity, &message, &createdAt); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{"vendor": vendor, "source_path": nullString(sourcePath), "severity": severity, "message": message, "created_at": createdAt.UTC().Format(time.RFC3339)})
+	}
+	return out, rows.Err()
+}
+
 func (a *API) Projects(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.DB.QueryContext(r.Context(), `
 		SELECT project, count(*)::bigint
@@ -119,7 +176,7 @@ func (a *API) MapRemote(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "remote_url is required")
 		return
 	}
-	
+
 	if req.Project == "" {
 		_, err := a.DB.ExecContext(r.Context(), "DELETE FROM project_remotes WHERE remote_url = $1", req.RemoteUrl)
 		if err != nil {
@@ -136,7 +193,7 @@ func (a *API) MapRemote(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	
+
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
 
@@ -206,11 +263,11 @@ func (a *API) Summary(w http.ResponseWriter, r *http.Request) {
 		  AND ($2 = '' OR COALESCE(project, '(unmapped)') = $2)
 	`, machine, project)
 	var (
-		sources, nonCursor         int64
+		sources, nonCursor            int64
 		in, outTok, cr, cw, cw5, cw1h int64
-		rated, provider            float64
-		ratedRows                  int64
-		minAt, maxAt               sql.NullTime
+		rated, provider               float64
+		ratedRows                     int64
+		minAt, maxAt                  sql.NullTime
 	)
 	if err := row.Scan(&sources, &nonCursor, &in, &outTok, &cr, &cw, &cw5, &cw1h, &rated, &provider, &ratedRows, &minAt, &maxAt); err != nil {
 		writeErr(w, 500, err.Error())
@@ -320,19 +377,18 @@ func (a *API) Daily(w http.ResponseWriter, r *http.Request) {
 	machine := r.URL.Query().Get("machine")
 	project := r.URL.Query().Get("project")
 	rows, err := a.DB.QueryContext(r.Context(), `
-		SELECT to_char((COALESCE(last_event_at, started_at, ingested_at) AT TIME ZONE 'UTC') + make_interval(hours => $4), 'YYYY-MM-DD') AS day,
-			COALESCE(sum(tokens_input), 0),
-			COALESCE(sum(tokens_output), 0),
-			COALESCE(sum(rated_cost_usd), 0),
+		SELECT to_char((l.occurred_at AT TIME ZONE 'UTC') + make_interval(hours => $4), 'YYYY-MM-DD') AS day,
+			COALESCE(sum(l.delta_tokens_input), 0),
+			COALESCE(sum(l.delta_tokens_output), 0),
+			COALESCE(sum(l.delta_rated_cost_usd), 0),
 			count(*)::bigint
-		FROM (
-			SELECT last_event_at, started_at, ingested_at,
-				tokens_input, tokens_output, rated_cost_usd
-			FROM v_burn_usage_rated
-			WHERE ($1 = '' OR host_id = $1)
-			  AND ($3 = '' OR COALESCE(project, '(unmapped)') = $3)
-			  AND COALESCE(last_event_at, started_at, ingested_at) >= (CURRENT_TIMESTAMP - make_interval(days => $2))
-		) t
+		FROM burn_usage_ledger l
+		LEFT JOIN path_remotes pr ON pr.host_id = l.host_id AND pr.source_path = l.source_path
+		LEFT JOIN project_remotes proj_rem ON proj_rem.remote_url = pr.remote_url
+		LEFT JOIN project_cwds proj_cwd ON proj_cwd.host_id = l.host_id AND proj_cwd.cwd = l.cwd
+		WHERE ($1 = '' OR l.host_id = $1)
+		  AND ($3 = '' OR COALESCE(proj_rem.project, proj_cwd.project, '(unmapped)') = $3)
+		  AND l.occurred_at >= (CURRENT_TIMESTAMP - make_interval(days => $2))
 		GROUP BY 1
 		ORDER BY 1
 	`, machine, days, project, a.dayOffsetHours())
@@ -391,11 +447,11 @@ func (a *API) Snapshots(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var (
 			id, machine, vendor, model, path, proj string
-			in, outTok, cr, cw               sql.NullInt64
-			cw5, cw1h                        sql.NullInt64
-			rated, pcost                     sql.NullFloat64
-			lastAt, startAt                  sql.NullTime
-			ingestedAt                       time.Time
+			in, outTok, cr, cw                     sql.NullInt64
+			cw5, cw1h                              sql.NullInt64
+			rated, pcost                           sql.NullFloat64
+			lastAt, startAt                        sql.NullTime
+			ingestedAt                             time.Time
 		)
 		if err := rows.Scan(&id, &machine, &vendor, &model, &path, &in, &outTok, &cr, &cw, &cw5, &cw1h, &rated, &pcost, &lastAt, &startAt, &ingestedAt, &proj); err != nil {
 			writeErr(w, 500, err.Error())
@@ -409,6 +465,56 @@ func (a *API) Snapshots(w http.ResponseWriter, r *http.Request) {
 			"rated_cost_usd": nullFloat(rated), "provider_cost": nullFloat(pcost),
 			"last_event_at": nullTime(lastAt), "started_at": nullTime(startAt), "ingested_at": ingestedAt,
 		})
+	}
+	writeJSON(w, 200, out)
+}
+
+// Ledger returns immutable usage-counter changes, not the mutable latest snapshots.
+func (a *API) Ledger(w http.ResponseWriter, r *http.Request) {
+	limit := queryInt(r, "limit", 500)
+	machine := r.URL.Query().Get("machine")
+	project := r.URL.Query().Get("project")
+	day := r.URL.Query().Get("day")
+	rows, err := a.DB.QueryContext(r.Context(), `
+		SELECT l.id, l.host_id, l.vendor, COALESCE(l.model, ''), l.source_path,
+			COALESCE(proj_rem.project, proj_cwd.project, '(unmapped)'), l.occurred_at,
+			l.delta_tokens_input, l.delta_tokens_output, l.delta_rated_cost_usd
+		FROM burn_usage_ledger l
+		LEFT JOIN path_remotes pr ON pr.host_id = l.host_id AND pr.source_path = l.source_path
+		LEFT JOIN project_remotes proj_rem ON proj_rem.remote_url = pr.remote_url
+		LEFT JOIN project_cwds proj_cwd ON proj_cwd.host_id = l.host_id AND proj_cwd.cwd = l.cwd
+		WHERE ($1 = '' OR l.host_id = $1)
+		  AND ($2 = '' OR COALESCE(proj_rem.project, proj_cwd.project, '(unmapped)') = $2)
+		  AND ($3 = '' OR to_char((l.occurred_at AT TIME ZONE 'UTC') + make_interval(hours => $5), 'YYYY-MM-DD') = $3)
+		ORDER BY l.occurred_at DESC, l.id DESC
+		LIMIT $4
+	`, machine, project, day, limit, a.dayOffsetHours())
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+
+	out := []map[string]any{}
+	for rows.Next() {
+		var id int64
+		var machine, vendor, model, path, proj string
+		var occurredAt time.Time
+		var in, outTok sql.NullInt64
+		var rated sql.NullFloat64
+		if err := rows.Scan(&id, &machine, &vendor, &model, &path, &proj, &occurredAt, &in, &outTok, &rated); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		out = append(out, map[string]any{
+			"id": id, "machine": machine, "vendor": vendor, "model": model, "source_path": path, "project": proj,
+			"occurred_at":        occurredAt.UTC().Format(time.RFC3339),
+			"delta_tokens_input": nullInt(in), "delta_tokens_output": nullInt(outTok), "delta_rated_cost_usd": nullFloat(rated),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		writeErr(w, 500, err.Error())
+		return
 	}
 	writeJSON(w, 200, out)
 }
@@ -436,8 +542,8 @@ func (a *API) Machines(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		out = append(out, map[string]any{
-			"machine": machine, 
-			"sources": sources,
+			"machine":      machine,
+			"sources":      sources,
 			"last_sync_at": nullTime(lastSync),
 		})
 	}

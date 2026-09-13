@@ -71,7 +71,7 @@ especially `OPENCODE_DB_PATH` and `CURSOR_STATE_DB`.
 ## 4. Create the scheduled task
 
 Pick one of the two paths below. Both result in a task that runs
-`token-usage-ingest.exe ingest` every 12 hours, only while the user is logged
+`token-usage-ingest.exe ingest` every 30 minutes, only while the user is logged
 on (needed to read that user's provider data), without starting overlapping
 runs.
 
@@ -79,8 +79,8 @@ runs.
 
 1. Select **Create Task**, name it `Token Usage Ingest`, and choose **Run only
    when user is logged on** so the task can read that user's provider data.
-2. Add a daily trigger at midnight, enable **Repeat task every: 12 hours**, and
-   set **for a duration of: Indefinitely**.
+2. Add a daily trigger, set it to repeat every **30 minutes** for a duration
+   of **Indefinitely**.
 3. Add action **Start a program**. Program:
    `C:\Services\token-usage-service\bin\token-usage-ingest.exe`; arguments:
    `ingest`; start in: `C:\Services\token-usage-service`.
@@ -102,12 +102,12 @@ $action  = New-ScheduledTaskAction -Execute 'C:\Services\token-usage-service\bin
              -Argument 'ingest' -WorkingDirectory 'C:\Services\token-usage-service'
 $trigger = New-ScheduledTaskTrigger -Daily -At 12am
 $rep = (New-ScheduledTaskTrigger -Once -At (Get-Date) `
-          -RepetitionInterval (New-TimeSpan -Hours 12) `
+          -RepetitionInterval (New-TimeSpan -Minutes 30) `
           -RepetitionDuration (New-TimeSpan -Days 3650)).Repetition
 $trigger.Repetition = $rep
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName 'Token Usage Ingest' -Action $action -Trigger $trigger `
-  -Settings $settings -RunLevel Limited -Description 'Collects local AI usage token data every 12 hours'
+  -Settings $settings -RunLevel Limited -Description 'Collects local AI usage token data every 30 minutes'
 Start-ScheduledTask -TaskName 'Token Usage Ingest'
 ```
 

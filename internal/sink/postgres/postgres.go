@@ -148,6 +148,11 @@ func (s *Sink) UpsertSnapshotAndCheckpoint(ctx context.Context, snap model.BurnS
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	previous, err := loadPreviousUsage(ctx, tx, snap.SourceID)
+	if err != nil {
+		return fmt.Errorf("load previous usage: %w", err)
+	}
+
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO burn_snapshots (
 			source_id, identity_version, host_id, vendor, source_path, stable_id,
@@ -207,6 +212,44 @@ func (s *Sink) UpsertSnapshotAndCheckpoint(ctx context.Context, snap model.BurnS
 		return fmt.Errorf("upsert snapshot: %w", err)
 	}
 
+	currentRated, err := ratedCost(ctx, tx, snap.SourceID)
+	if err != nil {
+		return fmt.Errorf("rate snapshot: %w", err)
+	}
+	occurredAt := snap.IngestedAt
+	if snap.LastEventAt != nil {
+		occurredAt = *snap.LastEventAt
+	} else if snap.StartedAt != nil {
+		occurredAt = *snap.StartedAt
+	}
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO burn_usage_ledger (
+			source_id, host_id, vendor, source_path, provider_session_id, cwd, model, occurred_at, recorded_at,
+			delta_tokens_input, delta_tokens_output, delta_tokens_cache_read, delta_tokens_cache_write,
+			delta_tokens_cache_write_5m, delta_tokens_cache_write_1h, delta_tokens_reasoning, delta_tokens_total,
+			delta_provider_cost, delta_rated_cost_usd,
+			total_tokens_input, total_tokens_output, total_tokens_cache_read, total_tokens_cache_write,
+			total_tokens_cache_write_5m, total_tokens_cache_write_1h, total_tokens_reasoning, total_tokens_total,
+			total_provider_cost, total_rated_cost_usd, usage_detail
+		) VALUES (
+			$1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),$8,$9,
+			$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
+			$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30
+		)`,
+		snap.SourceID, snap.HostID, snap.Vendor, snap.SourcePath, snap.ProviderSessionID, snap.CWD, snap.Model, occurredAt, snap.IngestedAt,
+		deltaInt(snap.Tokens.Input, previous.tokens.Input), deltaInt(snap.Tokens.Output, previous.tokens.Output),
+		deltaInt(snap.Tokens.CacheRead, previous.tokens.CacheRead), deltaInt(snap.Tokens.CacheWrite, previous.tokens.CacheWrite),
+		deltaInt(snap.Tokens.CacheWrite5m, previous.tokens.CacheWrite5m), deltaInt(snap.Tokens.CacheWrite1h, previous.tokens.CacheWrite1h),
+		deltaInt(snap.Tokens.Reasoning, previous.tokens.Reasoning), deltaInt(snap.Tokens.Total, previous.tokens.Total),
+		deltaFloat(snap.ProviderCost, previous.providerCost), deltaFloat(currentRated, previous.ratedCost),
+		snap.Tokens.Input, snap.Tokens.Output, snap.Tokens.CacheRead, snap.Tokens.CacheWrite,
+		snap.Tokens.CacheWrite5m, snap.Tokens.CacheWrite1h, snap.Tokens.Reasoning, snap.Tokens.Total,
+		snap.ProviderCost, currentRated, nullJSON(snap.UsageDetail),
+	)
+	if err != nil {
+		return fmt.Errorf("insert usage ledger: %w", err)
+	}
+
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO burn_checkpoints (
 			source_id, host_id, vendor, source_path, mtime_ns, size_bytes, processing_signature, updated_at
@@ -223,6 +266,86 @@ func (s *Sink) UpsertSnapshotAndCheckpoint(ctx context.Context, snap model.BurnS
 	return tx.Commit()
 }
 
+type previousUsage struct {
+	tokens       model.Tokens
+	providerCost *float64
+	ratedCost    *float64
+}
+
+func loadPreviousUsage(ctx context.Context, tx *sql.Tx, sourceID string) (previousUsage, error) {
+	var p previousUsage
+	var in, out, cacheRead, cacheWrite, cacheWrite5m, cacheWrite1h, reasoning, total sql.NullInt64
+	var providerCost sql.NullFloat64
+	err := tx.QueryRowContext(ctx, `
+		SELECT tokens_input, tokens_output, tokens_cache_read, tokens_cache_write,
+			tokens_cache_write_5m, tokens_cache_write_1h, tokens_reasoning, tokens_total, provider_cost
+		FROM burn_snapshots WHERE source_id = $1 FOR UPDATE`, sourceID,
+	).Scan(&in, &out, &cacheRead, &cacheWrite, &cacheWrite5m, &cacheWrite1h, &reasoning, &total, &providerCost)
+	if err == sql.ErrNoRows {
+		return p, nil
+	}
+	if err != nil {
+		return p, err
+	}
+	p.tokens = model.Tokens{Input: intPtr(in), Output: intPtr(out), CacheRead: intPtr(cacheRead), CacheWrite: intPtr(cacheWrite), CacheWrite5m: intPtr(cacheWrite5m), CacheWrite1h: intPtr(cacheWrite1h), Reasoning: intPtr(reasoning), Total: intPtr(total)}
+	p.providerCost = floatPtr(providerCost)
+	rated, err := ratedCost(ctx, tx, sourceID)
+	if err != nil {
+		return p, err
+	}
+	p.ratedCost = rated
+	return p, nil
+}
+
+func ratedCost(ctx context.Context, tx *sql.Tx, sourceID string) (*float64, error) {
+	var value sql.NullFloat64
+	if err := tx.QueryRowContext(ctx, `SELECT rated_cost_usd FROM v_burn_usage_rated WHERE source_id = $1`, sourceID).Scan(&value); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return floatPtr(value), nil
+}
+
+func intPtr(v sql.NullInt64) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Int64
+}
+
+func floatPtr(v sql.NullFloat64) *float64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Float64
+}
+
+func deltaInt(current, previous *int64) *int64 {
+	if current == nil {
+		return nil
+	}
+	base := int64(0)
+	if previous != nil {
+		base = *previous
+	}
+	delta := *current - base
+	return &delta
+}
+
+func deltaFloat(current, previous *float64) *float64 {
+	if current == nil {
+		return nil
+	}
+	base := float64(0)
+	if previous != nil {
+		base = *previous
+	}
+	delta := *current - base
+	return &delta
+}
+
 func (s *Sink) UpsertPathRemote(ctx context.Context, pr model.PathRemote) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO path_remotes (host_id, source_path, remote_url, remote_name, repo_root, resolved_at)
@@ -233,6 +356,30 @@ func (s *Sink) UpsertPathRemote(ctx context.Context, pr model.PathRemote) error 
 			repo_root = EXCLUDED.repo_root,
 			resolved_at = now()
 	`, pr.HostID, pr.SourcePath, pr.RemoteURL, pr.RemoteName, pr.RepoRoot)
+	return err
+}
+
+func (s *Sink) StartRun(ctx context.Context, hostID string) (int64, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx, `INSERT INTO burn_ingest_runs (host_id) VALUES ($1) RETURNING id`, hostID).Scan(&id)
+	return id, err
+}
+
+func (s *Sink) FinishRun(ctx context.Context, runID int64, run model.IngestRun) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE burn_ingest_runs SET completed_at = now(), status = $2, scanned = $3, unchanged_skipped = $4,
+			parsed = $5, upserted = $6, skipped = $7, deferred = $8, errors = $9, path_remotes_upserted = $10,
+			fatal_error = NULLIF($11, '') WHERE id = $1`,
+		runID, run.Status, run.Scanned, run.UnchangedSkipped, run.Parsed, run.Upserted,
+		run.Skipped, run.Deferred, run.Errors, run.PathRemotesUpsert, run.FatalError)
+	return err
+}
+
+func (s *Sink) RecordRunIssue(ctx context.Context, runID int64, issue model.IngestIssue) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO burn_ingest_issues (run_id, vendor, source_path, severity, message)
+		VALUES ($1, $2, NULLIF($3, ''), $4, $5)`,
+		runID, issue.Vendor, issue.SourcePath, issue.Severity, issue.Message)
 	return err
 }
 
@@ -253,3 +400,4 @@ func pqTextArray(ss []string) any {
 }
 
 var _ sink.Sink = (*Sink)(nil)
+var _ sink.RunRecorder = (*Sink)(nil)

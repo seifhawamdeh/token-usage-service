@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { getJSON, buildUrl } from "./lib/api";
-import type { Summary, Vendor, Model, Project, Daily, Remote, Machine, Snapshot, Cwd } from "./types";
+import type { Summary, Vendor, Model, Project, Daily, Remote, Machine, Snapshot, Cwd, LedgerEntry, IngestHealth } from "./types";
 import { fmt } from "./lib/utils";
 import {
   BarChart,
@@ -22,8 +22,9 @@ export default function App() {
   const [remotes, setRemotes] = useState<Remote[]>([]);
   const [cwds, setCwds] = useState<Cwd[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [ingestHealth, setIngestHealth] = useState<IngestHealth | null>(null);
   const [snaps, setSnaps] = useState<Snapshot[]>([]);
-  const [dailySnaps, setDailySnaps] = useState<Snapshot[]>([]);
+  const [dailyLedger, setDailyLedger] = useState<LedgerEntry[]>([]);
 
   const [filterMachine, setFilterMachine] = useState("");
   const [filterProject, setFilterProject] = useState("");
@@ -31,6 +32,7 @@ export default function App() {
   
   const [activeTab, setActiveTab] = useState("home");
   const [selectedDay, setSelectedDay] = useState<string>("");
+  const [isHealthOpen, setIsHealthOpen] = useState(false);
 
   const [error, setError] = useState("");
 
@@ -45,7 +47,7 @@ export default function App() {
       setProjects(p);
 
       const params = { machine: filterMachine, project: filterProject };
-      const [sum, v, mod, bp, d, r, c] = await Promise.all([
+      const [sum, v, mod, bp, d, r, c, health] = await Promise.all([
         getJSON(buildUrl("/api/summary", params)),
         getJSON(buildUrl("/api/by-vendor", params)),
         getJSON(buildUrl("/api/by-model", { ...params, limit: "40" })),
@@ -53,6 +55,7 @@ export default function App() {
         getJSON(buildUrl("/api/daily", { ...params, days: "45" })),
         getJSON(buildUrl("/api/remotes", params)),
         getJSON(buildUrl("/api/cwds", params)),
+        getJSON(buildUrl("/api/ingest-health", { machine: filterMachine })),
       ]);
 
       setSummary(sum);
@@ -62,6 +65,7 @@ export default function App() {
       setDaily(d);
       setRemotes(r);
       setCwds(c);
+      setIngestHealth(health);
       
       if (!selectedDay && d.length > 0) {
         setSelectedDay(d[d.length - 1].day);
@@ -98,7 +102,7 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedDay) return;
-    const loadDailySnaps = async () => {
+    const loadDailyLedger = async () => {
       const params = {
         machine: filterMachine,
         project: filterProject,
@@ -106,13 +110,13 @@ export default function App() {
         limit: "500",
       };
       try {
-        const s = await getJSON(buildUrl("/api/snapshots", params));
-        setDailySnaps(s);
+        const entries = await getJSON(buildUrl("/api/ledger", params));
+        setDailyLedger(entries);
       } catch (err: any) {
         setError(err.message);
       }
     };
-    loadDailySnaps();
+    loadDailyLedger();
   }, [selectedDay, filterMachine, filterProject]);
 
   const handleSaveProject = async (remote_url: string, project: string) => {
@@ -228,6 +232,39 @@ export default function App() {
                 </option>
               ))}
             </select>
+
+            {ingestHealth && (
+              <div className="relative">
+                <button
+                  onClick={() => setIsHealthOpen((open) => !open)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${ingestHealth.status === "ok" ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200" : ingestHealth.status === "no_runs" ? "bg-amber-100 text-amber-800 hover:bg-amber-200" : "bg-red-100 text-red-800 hover:bg-red-200"}`}
+                  aria-expanded={isHealthOpen}
+                  aria-controls="ingest-health-popover"
+                >
+                  Ingest: {ingestHealth.status}
+                </button>
+                {isHealthOpen && (
+                  <div id="ingest-health-popover" className="absolute right-0 top-full z-20 mt-2 w-[min(28rem,calc(100vw-3rem))] rounded-xl border border-gray-200 bg-white p-5 text-left shadow-lg">
+                    <div className="flex items-center justify-between gap-4">
+                      <h2 className="font-semibold text-gray-900">Ingest health</h2>
+                      <button onClick={() => setIsHealthOpen(false)} className="text-sm font-medium text-gray-500 hover:text-gray-900">Close</button>
+                    </div>
+                    {ingestHealth.last_run ? (
+                      <p className="mt-2 text-sm text-gray-600">Last run {fmt.when(ingestHealth.last_run.completed_at || ingestHealth.last_run.started_at)} · {fmt.int(ingestHealth.last_run.upserted)} updated · {fmt.int(ingestHealth.last_run.errors)} errors · {fmt.int(ingestHealth.last_run.skipped)} skipped</p>
+                    ) : (
+                      <p className="mt-2 text-sm text-gray-600">No completed ingest run recorded.</p>
+                    )}
+                    {ingestHealth.issues.length > 0 && (
+                      <ul className="mt-4 space-y-2 border-t border-gray-100 pt-3 text-sm text-gray-700">
+                        {ingestHealth.issues.slice(0, 5).map((issue, i) => (
+                          <li key={`${issue.created_at}-${i}`}><span className="font-medium">{issue.severity}: {issue.vendor}</span> — {issue.message}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             <button
               onClick={loadAll}
@@ -376,24 +413,24 @@ export default function App() {
               </div>
 
               {selectedDay && (
-                <Card title={`Sessions on ${selectedDay}`}>
+                <Card title={`Usage changes on ${selectedDay}`}>
                   <div className="overflow-x-auto">
                     <Table headers={["When", "Machine", "Project", "Vendor", "Model", "In", "Out", "Rated USD"]}>
-                      {dailySnaps.length === 0 ? (
+                      {dailyLedger.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="text-center py-4 text-gray-500">No sessions recorded on this day.</td>
+                          <td colSpan={8} className="text-center py-4 text-gray-500">No usage changes recorded on this day.</td>
                         </tr>
                       ) : (
-                        dailySnaps.map((s) => (
-                          <tr key={s.source_id}>
-                            <td className="text-gray-500 whitespace-nowrap">{fmt.when(s.last_event_at || s.started_at || s.ingested_at)}</td>
-                            <td className="text-gray-900">{s.machine}</td>
-                            <td className="text-gray-900">{s.project}</td>
-                            <td className="text-gray-900">{s.vendor}</td>
-                            <td className="text-gray-500">{s.model || "—"}</td>
-                            <td className="text-right text-gray-500">{fmt.compact(s.tokens_input)}</td>
-                            <td className="text-right text-gray-500">{fmt.compact(s.tokens_output)}</td>
-                            <td className="text-right text-gray-900 font-medium">{fmt.usd(s.rated_cost_usd)}</td>
+                        dailyLedger.map((entry) => (
+                          <tr key={entry.id}>
+                            <td className="text-gray-500 whitespace-nowrap">{fmt.when(entry.occurred_at)}</td>
+                            <td className="text-gray-900">{entry.machine}</td>
+                            <td className="text-gray-900">{entry.project}</td>
+                            <td className="text-gray-900">{entry.vendor}</td>
+                            <td className="text-gray-500">{entry.model || "—"}</td>
+                            <td className="text-right text-gray-500">{fmt.compact(entry.delta_tokens_input)}</td>
+                            <td className="text-right text-gray-500">{fmt.compact(entry.delta_tokens_output)}</td>
+                            <td className="text-right text-gray-900 font-medium">{fmt.usd(entry.delta_rated_cost_usd)}</td>
                           </tr>
                         ))
                       )}

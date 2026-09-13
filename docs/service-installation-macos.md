@@ -64,7 +64,7 @@ Create `~/Library/LaunchAgents/com.example.token-usage-ingest.plist`. Replace
   <key>WorkingDirectory</key>
   <string>/Users/USER/src/token-usage-service</string>
   <key>StartInterval</key>
-  <integer>43200</integer>
+  <integer>1800</integer>
   <key>RunAtLoad</key>
   <true/>
   <key>StandardOutPath</key>
@@ -75,7 +75,7 @@ Create `~/Library/LaunchAgents/com.example.token-usage-ingest.plist`. Replace
 </plist>
 ```
 
-`StartInterval` is in seconds; `43200` is 12 hours.
+`StartInterval` is in seconds; `1800` is 30 minutes.
 
 Validate, enable, and test it:
 

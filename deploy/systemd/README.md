@@ -1,6 +1,6 @@
 # systemd user services
 
-The timer runs one-shot ingest every 12 hours. The dashboard service keeps the
+The timer runs one-shot ingest every 30 minutes. The dashboard service keeps the
 HTTP dashboard running.
 
 For shared prerequisites, upgrades, and removal, see the

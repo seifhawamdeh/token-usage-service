@@ -26,3 +26,6 @@ node_modules/
 # Personal Cursor usage exports (keep only *.example.csv in git)
 cursor-usage-reports/*.csv
 !cursor-usage-reports/*.example.csv
+
+# graphify scratch output
+graphify-out/
