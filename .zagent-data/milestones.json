@@ -1,5 +1,12 @@
 {
-  "milestones": {},
-  "order": [],
+  "milestones": {
+    "inbox": {
+      "id": "inbox",
+      "title": "Inbox"
+    }
+  },
+  "order": [
+    "inbox"
+  ],
   "schemaVersion": "1"
 }
