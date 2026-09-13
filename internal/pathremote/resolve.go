@@ -34,6 +34,24 @@ func Resolve(hostID, sourcePath string) model.PathRemote {
 	return pr
 }
 
+// ResolveWithKnownRemote uses a remote URL already embedded in the transcript
+// (e.g. Codex's session_meta.git.repository_url) when available, skipping the
+// local git shell-out entirely. This is more reliable than ResolveFromCWD
+// since it works even when ingest runs on a different machine than the one
+// that recorded the session, or the repo no longer exists locally.
+func ResolveWithKnownRemote(hostID, sourcePath, cwd, knownRemoteURL string) model.PathRemote {
+	if knownRemoteURL != "" {
+		url := normalizeRemoteURL(knownRemoteURL)
+		return model.PathRemote{
+			HostID:     hostID,
+			SourcePath: sourcePath,
+			RemoteName: "origin",
+			RemoteURL:  &url,
+		}
+	}
+	return ResolveFromCWD(hostID, sourcePath, cwd)
+}
+
 // ResolveFromCWD resolves remote using a workspace cwd (preferred for transcript metadata).
 func ResolveFromCWD(hostID, sourcePath, cwd string) model.PathRemote {
 	if cwd != "" {
@@ -68,5 +86,25 @@ func gitRemoteURL(repoRoot, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	return normalizeRemoteURL(strings.TrimSpace(string(out))), nil
+}
+
+// normalizeRemoteURL canonicalizes a git remote URL so the same repository
+// resolves to the same string regardless of whether it was read via
+// `git remote get-url` (which may return the SSH form with a `.git` suffix,
+// e.g. git@github.com:org/repo.git) or from transcript metadata such as
+// Codex's session_meta.git.repository_url (typically an https URL with no
+// `.git` suffix, e.g. https://github.com/org/repo).
+func normalizeRemoteURL(raw string) string {
+	url := strings.TrimSpace(raw)
+	url = strings.TrimSuffix(url, "/")
+	url = strings.TrimSuffix(url, ".git")
+	if rest, ok := strings.CutPrefix(url, "git@"); ok {
+		if host, path, ok := strings.Cut(rest, ":"); ok {
+			url = "https://" + host + "/" + path
+		}
+	} else if rest, ok := strings.CutPrefix(url, "ssh://git@"); ok {
+		url = "https://" + rest
+	}
+	return url
 }

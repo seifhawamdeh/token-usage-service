@@ -6,11 +6,11 @@ import (
 	"net/http"
 )
 
-//go:embed static/*
+//go:embed web/dist/*
 var staticFS embed.FS
 
 func StaticHandler() http.Handler {
-	sub, err := fs.Sub(staticFS, "static")
+	sub, err := fs.Sub(staticFS, "web/dist")
 	if err != nil {
 		panic(err)
 	}

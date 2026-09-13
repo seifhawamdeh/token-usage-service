@@ -9,6 +9,11 @@ coverage.out
 /tmp/
 .DS_Store
 
+# Build outputs
+/dashboard
+/ingest
+node_modules/
+
 # Local agent / IDE MCP configs (machine-specific paths)
 .agents/
 .codex/
