@@ -5,6 +5,7 @@
       "createdAt": "2026-09-13T23:04:30.013Z",
       "description": "Per machine/project/vendor budget thresholds (daily/weekly), projected month-end spend, local notification/webhook on breach. Built on rated_cost_usd (v_burn_usage_rated) — label rate-card estimates clearly separate from provider-reported cost. Unblocked by usage ledger (#1) and dedup engine (#2) already shipping. Est. 2-3 days.",
       "id": "8d3bb845-c0a2-42b2-ad23-92401b748146",
+      "milestoneId": "inbox",
       "priority": "high",
       "status": "open",
       "title": "Budget alerts and spend forecasts",

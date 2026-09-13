@@ -5,6 +5,7 @@
       "createdAt": "2026-09-13T23:04:32.112Z",
       "description": "CSV/JSON export of snapshots/ledger, plus redaction of local paths and remote URLs before export (docs already flag these as sensitive). Skip read-only API token/auth mode — no multi-user model exists in this local single-machine tool; only build if remote/multi-user access becomes an actual need. Est. 1-2 days for export+redaction.",
       "id": "4e617a10-d25a-435e-9d66-281f719db4a0",
+      "milestoneId": "inbox",
       "priority": "medium",
       "status": "open",
       "title": "Secure export + path/remote redaction",
