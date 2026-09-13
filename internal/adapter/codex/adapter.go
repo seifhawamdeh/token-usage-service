@@ -20,22 +20,28 @@ const (
 )
 
 type Adapter struct {
-	SessionsRoot string
+	Root string
 }
 
-func New(sessionsRoot string) *Adapter {
-	if sessionsRoot == "" {
+// New builds an adapter rooted at the Codex data directory. The root is
+// intentionally broader than ~/.codex/sessions: Codex can persist background
+// and delegated sessions in sibling directories (for example,
+// ~/.codex/multica-sessions). Discovery still accepts only rollout-*.jsonl, so
+// unrelated JSONL stores such as history and temporary evaluation data are not
+// treated as sessions.
+func New(root string) *Adapter {
+	if root == "" {
 		home, _ := os.UserHomeDir()
-		sessionsRoot = filepath.Join(home, ".codex", "sessions")
+		root = filepath.Join(home, ".codex")
 	}
-	return &Adapter{SessionsRoot: sessionsRoot}
+	return &Adapter{Root: root}
 }
 
 func (a *Adapter) Name() string    { return VendorName }
 func (a *Adapter) Version() string { return Version }
 
 func (a *Adapter) Discover(ctx context.Context) ([]model.SourceDescriptor, error) {
-	root := a.SessionsRoot
+	root := a.Root
 	if _, err := os.Stat(root); err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

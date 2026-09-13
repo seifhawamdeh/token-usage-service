@@ -5,6 +5,14 @@ This guide uses **Task Scheduler**, either through the GUI or through
 PowerShell's `ScheduledTask` cmdlets. Both produce the same task; pick
 whichever fits your workflow. All commands run from PowerShell.
 
+For interactive setup from the repository root, run:
+
+```powershell
+.\scripts\install\windows.ps1
+```
+
+The sections below document the equivalent manual setup.
+
 ## 1. Prerequisites
 
 Check whether Go is already installed:

@@ -11,6 +11,15 @@ Examples in the OS-specific guides assume the repository remains installed
 because both programs load `.env` from their working directory. Replace every
 example path and user name before enabling a service.
 
+For interactive setup, run the installer for the current operating system from
+the repository root:
+
+```text
+Linux:   ./scripts/install/linux.sh
+macOS:   ./scripts/install/macos.sh
+Windows: .\scripts\install\windows.ps1
+```
+
 ## Common setup
 
 1. Install Go 1.25 or newer and provide a reachable PostgreSQL database.

@@ -86,7 +86,7 @@ Checkpoints also store `processing_signature = adapter@version|schema=N` so pars
 | `HOST_ID` | Stable machine identity (required) |
 | `ENABLED_VENDORS` | Comma-separated adapter ids |
 | `SINK` | `postgres` (only value in v1) |
-| `CLAUDE_PROJECTS_ROOT`, `CODEX_SESSIONS_ROOT`, `OPENCODE_DB_PATH`, `COPILOT_DB_PATH`, `GEMINI_TMP_ROOT`, `ANTIGRAVITY_ROOT`, `CURSOR_STATE_DB` | Optional path overrides |
+| `CLAUDE_PROJECTS_ROOT`, `CODEX_ROOT`, `OPENCODE_DB_PATH`, `COPILOT_DB_PATH`, `GEMINI_TMP_ROOT`, `ANTIGRAVITY_ROOT`, `CURSOR_STATE_DB` | Optional path overrides (`CODEX_SESSIONS_ROOT` remains a compatibility alias) |
 | `CURSOR_USAGE_REPORTS_DIR` | Cursor usage-events CSV directory (default `cursor-usage-reports`) |
 | `COPILOT_FORCE_LEGACY_PREMIUM_REQUESTS` | `true` → PRU regime after cutover |
 

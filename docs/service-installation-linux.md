@@ -4,6 +4,14 @@ Prefer a per-user systemd timer. It runs ingest at midnight and noon,
 including one catch-up run after missed schedules, and needs no root service
 account. Fall back to cron only on systems without systemd.
 
+For interactive setup from the repository root, run:
+
+```bash
+./scripts/install/linux.sh
+```
+
+The sections below document the equivalent manual setup.
+
 ## 1. Install Go
 
 The project requires Go 1.25 or newer. First check the installed version:
@@ -81,7 +89,8 @@ placeholder with the real connection string, then protect the file:
 chmod 600 .env
 ```
 
-Default discovery checks `~/.claude/projects`, `~/.codex/sessions`, and
+Default discovery checks `~/.claude/projects`, all `rollout-*.jsonl` files
+under `~/.codex`, and
 `~/.gemini/tmp`. A missing directory is harmless but produces no snapshots for
 that provider. Set the matching path override in `.env` if data lives elsewhere.
 

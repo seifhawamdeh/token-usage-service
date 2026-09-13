@@ -4,11 +4,59 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/seif/token-usage-service/internal/adapter/codex"
 	"github.com/seif/token-usage-service/internal/model"
 )
+
+func TestDiscoverFindsRolloutsAcrossCodexRoot(t *testing.T) {
+	root := t.TempDir()
+	paths := []string{
+		filepath.Join(root, "sessions", "2026", "rollout-normal.jsonl"),
+		filepath.Join(root, "background-sessions", "rollout-background.jsonl"),
+		filepath.Join(root, "future-layout", "nested", "rollout-delegated.jsonl"),
+	}
+	for _, path := range paths {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(root, "history.jsonl"),
+		filepath.Join(root, ".tmp", "responses.jsonl"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	sources, err := codex.New(root).Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, source := range sources {
+		got = append(got, source.SourcePath)
+	}
+	sort.Strings(got)
+	sort.Strings(paths)
+	if len(got) != len(paths) {
+		t.Fatalf("got %d sources (%v), want %d (%v)", len(got), got, len(paths), paths)
+	}
+	for i := range paths {
+		if got[i] != paths[i] {
+			t.Fatalf("source[%d]=%q, want %q", i, got[i], paths[i])
+		}
+	}
+}
 
 func TestParseSumsSegmentPeaksAcrossCompactionResets(t *testing.T) {
 	dir := t.TempDir()

@@ -9,20 +9,20 @@ import (
 )
 
 type Config struct {
-	DatabaseURL        string
-	HostID             string
-	EnabledVendors     []string
-	Sink               string
-	ClaudeProjectsRoot string
-	CodexSessionsRoot  string
-	OpenCodeDBPath     string
-	CopilotDBPath      string
-	CopilotForceLegacy bool
-	GeminiTmpRoot      string
+	DatabaseURL           string
+	HostID                string
+	EnabledVendors        []string
+	Sink                  string
+	ClaudeProjectsRoot    string
+	CodexRoot             string
+	OpenCodeDBPath        string
+	CopilotDBPath         string
+	CopilotForceLegacy    bool
+	GeminiTmpRoot         string
 	AntigravityRoot       string
-	CursorStateDB          string
-	CursorUsageReportsDir  string
-	LogFormat              string
+	CursorStateDB         string
+	CursorUsageReportsDir string
+	LogFormat             string
 }
 
 func Load(envFiles ...string) (*Config, error) {
@@ -33,16 +33,16 @@ func Load(envFiles ...string) (*Config, error) {
 	_ = godotenv.Load()
 
 	c := &Config{
-		DatabaseURL:        firstEnv("DATABASE_URL"),
-		HostID:             firstEnv("HOST_ID", "HOST"),
-		Sink:               strings.ToLower(firstEnv("SINK", "TOKEN_USAGE_SINK")),
-		ClaudeProjectsRoot: firstEnv("CLAUDE_PROJECTS_ROOT"),
-		CodexSessionsRoot:  firstEnv("CODEX_SESSIONS_ROOT"),
-		OpenCodeDBPath:     firstEnv("OPENCODE_DB_PATH"),
-		CopilotDBPath:      firstEnv("COPILOT_DB_PATH"),
-		CopilotForceLegacy: strings.EqualFold(firstEnv("COPILOT_FORCE_LEGACY_PREMIUM_REQUESTS"), "true"),
-		GeminiTmpRoot:      firstEnv("GEMINI_TMP_ROOT"),
-		AntigravityRoot:      firstEnv("ANTIGRAVITY_ROOT"),
+		DatabaseURL:           firstEnv("DATABASE_URL"),
+		HostID:                firstEnv("HOST_ID", "HOST"),
+		Sink:                  strings.ToLower(firstEnv("SINK", "TOKEN_USAGE_SINK")),
+		ClaudeProjectsRoot:    firstEnv("CLAUDE_PROJECTS_ROOT"),
+		CodexRoot:             firstEnv("CODEX_ROOT", "CODEX_SESSIONS_ROOT"),
+		OpenCodeDBPath:        firstEnv("OPENCODE_DB_PATH"),
+		CopilotDBPath:         firstEnv("COPILOT_DB_PATH"),
+		CopilotForceLegacy:    strings.EqualFold(firstEnv("COPILOT_FORCE_LEGACY_PREMIUM_REQUESTS"), "true"),
+		GeminiTmpRoot:         firstEnv("GEMINI_TMP_ROOT"),
+		AntigravityRoot:       firstEnv("ANTIGRAVITY_ROOT"),
 		CursorStateDB:         firstEnv("CURSOR_STATE_DB"),
 		CursorUsageReportsDir: firstEnv("CURSOR_USAGE_REPORTS_DIR"),
 		LogFormat:             firstEnv("LOG_FORMAT"),

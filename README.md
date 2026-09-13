@@ -23,6 +23,14 @@ Missing token values remain `null`. Vendors may embed `provider_cost`; optional 
 
 Prerequisites: **Go 1.25+**, a reachable **PostgreSQL database**, and local data from a supported source. Default source paths follow Linux conventions; overrides are available.
 
+Interactive installers:
+
+```text
+Linux:   ./scripts/install/linux.sh
+macOS:   ./scripts/install/macos.sh
+Windows: .\scripts\install\windows.ps1
+```
+
 ### 1. Get the project
 
 ```bash
@@ -78,7 +86,7 @@ snapshot by `HOST_ID`.
 | Adapter | Default source | Usage behavior |
 | --- | --- | --- |
 | `claude-code` | `~/.claude/projects/**/*.jsonl` | Dedupes streamed-chunk lines by `message.id`, then sums usage |
-| `codex` | `~/.codex/sessions/**/rollout-*.jsonl` | Sums the peak `total_token_usage` of each compaction segment; input excludes cache overlap |
+| `codex` | `~/.codex/**/rollout-*.jsonl` | Finds normal/background sessions and sums the peak `total_token_usage` of each compaction segment; input excludes cache overlap |
 | `opencode` | `~/.local/share/opencode/opencode.db` | Reads session token fields |
 | `github-copilot` | `~/.copilot/session-store.db` | Aggregates events with date-aware billing semantics |
 | `gemini` | `~/.gemini/tmp/**/session-*` | Reads local CLI session usage |

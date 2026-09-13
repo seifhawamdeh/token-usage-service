@@ -4,6 +4,14 @@ macOS uses `launchd` instead of systemd or Task Scheduler. Ingest runs as a
 per-user `LaunchAgent` on an interval; the dashboard runs as a `LaunchAgent`
 kept alive in the background.
 
+For interactive setup from the repository root, run:
+
+```bash
+./scripts/install/macos.sh
+```
+
+The sections below document the equivalent manual setup.
+
 ## 1. Install Go and the repository
 
 ```bash

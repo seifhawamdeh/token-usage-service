@@ -121,7 +121,7 @@ func buildAdapters(cfg *config.Config) ([]adapter.VendorAdapter, error) {
 		case "claude-code":
 			out = append(out, claudecode.New(cfg.ClaudeProjectsRoot))
 		case "codex":
-			out = append(out, codex.New(cfg.CodexSessionsRoot))
+			out = append(out, codex.New(cfg.CodexRoot))
 		case "opencode":
 			out = append(out, opencode.New(cfg.OpenCodeDBPath))
 		case "github-copilot":

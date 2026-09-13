@@ -77,7 +77,9 @@ Advance watermarks **only** after a successful snapshot write.
 
 ### 3.2 `codex`
 
-- **Roots:** `~/.codex/sessions/**/rollout-*.jsonl`
+- **Root:** `~/.codex` recursively; accept only `rollout-*.jsonl`. This includes
+  normal, background, delegated, archived, and future session directories while
+  excluding unrelated JSONL stores such as history and temporary eval data.
 - **Identity:** prefer `session_id` (from `session_meta.payload.session_id`/`.id`); watermark on rollout path
 - **Line shape (verified against real rollout files, 2026-09):** envelope `{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{...},"last_token_usage":{...}}}}`. There is no `token_usage_record` / `thread_token_usage` envelope in real Codex output — an earlier adapter version invented that shape and matched almost nothing (see "History" below).
 - **Map (from `info.total_token_usage`):** `input_tokens - cached_input_tokens` → input (fresh-only, see below); `cached_input_tokens` → cache_read; `cache_write_input_tokens` → cache_write; `output_tokens` → output; `reasoning_output_tokens` → reasoning; `total_tokens` → total (raw, unadjusted — still `input_tokens + output_tokens`). `info.last_token_usage` is per-turn-since-last-report and is not used.
