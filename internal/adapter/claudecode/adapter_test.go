@@ -310,6 +310,56 @@ func TestDiscoverOrphanJobs(t *testing.T) {
 	}
 }
 
+func TestDiscoverIncludesSubagentTranscripts(t *testing.T) {
+	projectsDir := t.TempDir()
+	jobsDir := t.TempDir()
+	parentPath := filepath.Join(projectsDir, "project-slug", "session-id.jsonl")
+	subagentPath := filepath.Join(projectsDir, "project-slug", "session-id", "subagents", "agent-id.jsonl")
+
+	for path, content := range map[string]string{
+		parentPath:   `{"type":"user"}` + "\n",
+		subagentPath: `{"type":"assistant","message":{"id":"msg_1","model":"claude-sonnet","usage":{"input_tokens":2,"output_tokens":3}}}` + "\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ad := claudecode.New(projectsDir, jobsDir)
+	sources, err := ad.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 2 {
+		t.Fatalf("expected parent and subagent sources, got %d: %+v", len(sources), sources)
+	}
+
+	var subagentSource *model.SourceDescriptor
+	for i := range sources {
+		if sources[i].SourcePath == subagentPath {
+			subagentSource = &sources[i]
+			break
+		}
+	}
+	if subagentSource == nil {
+		t.Fatalf("subagent transcript not discovered: %s", subagentPath)
+	}
+
+	res := ad.Parse(context.Background(), *subagentSource)
+	if res.Error != nil {
+		t.Fatal(res.Error)
+	}
+	if res.Snapshot == nil || res.Snapshot.Tokens.Input == nil || *res.Snapshot.Tokens.Input != 2 {
+		t.Fatalf("subagent input tokens not calculated: %+v", res.Snapshot)
+	}
+	if res.Snapshot.Tokens.Output == nil || *res.Snapshot.Tokens.Output != 3 {
+		t.Fatalf("subagent output tokens not calculated: %+v", res.Snapshot.Tokens)
+	}
+}
+
 func makeJobState(t *testing.T, jobsDir, name string, state map[string]any) {
 	t.Helper()
 	dir := filepath.Join(jobsDir, name)
