@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { getJSON, buildUrl } from "./lib/api";
-import type { Summary, Vendor, Model, Project, Daily, Remote, Machine, Snapshot, Cwd, LedgerEntry, IngestHealth } from "./types";
+import type { Summary, Vendor, Model, Project, Daily, Remote, Machine, Snapshot, Cwd, LedgerEntry, IngestHealth, DuplicateGroup } from "./types";
 import { fmt } from "./lib/utils";
 import {
   BarChart,
@@ -11,7 +11,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { LayoutDashboard, Settings2, RefreshCw, Home, Calendar, Settings, Server } from "lucide-react";
+import { LayoutDashboard, Settings2, RefreshCw, Home, Calendar, Settings, Server, Copy } from "lucide-react";
 
 export default function App() {
   const [machines, setMachines] = useState<Machine[]>([]);
@@ -25,6 +25,7 @@ export default function App() {
   const [ingestHealth, setIngestHealth] = useState<IngestHealth | null>(null);
   const [snaps, setSnaps] = useState<Snapshot[]>([]);
   const [dailyLedger, setDailyLedger] = useState<LedgerEntry[]>([]);
+  const [duplicates, setDuplicates] = useState<DuplicateGroup[]>([]);
 
   const [filterMachine, setFilterMachine] = useState("");
   const [filterProject, setFilterProject] = useState("");
@@ -47,7 +48,7 @@ export default function App() {
       setProjects(p);
 
       const params = { machine: filterMachine, project: filterProject };
-      const [sum, v, mod, bp, d, r, c, health] = await Promise.all([
+      const [sum, v, mod, bp, d, r, c, health, dupes] = await Promise.all([
         getJSON(buildUrl("/api/summary", params)),
         getJSON(buildUrl("/api/by-vendor", params)),
         getJSON(buildUrl("/api/by-model", { ...params, limit: "40" })),
@@ -56,6 +57,7 @@ export default function App() {
         getJSON(buildUrl("/api/remotes", params)),
         getJSON(buildUrl("/api/cwds", params)),
         getJSON(buildUrl("/api/ingest-health", { machine: filterMachine })),
+        getJSON("/api/duplicates"),
       ]);
 
       setSummary(sum);
@@ -66,6 +68,7 @@ export default function App() {
       setRemotes(r);
       setCwds(c);
       setIngestHealth(health);
+      setDuplicates(dupes);
       
       if (!selectedDay && d.length > 0) {
         setSelectedDay(d[d.length - 1].day);
@@ -197,6 +200,20 @@ export default function App() {
           >
             <Settings className="w-4 h-4" />
             Configs
+          </button>
+          <button
+            onClick={() => setActiveTab("duplicates")}
+            className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === "duplicates" ? "bg-indigo-50 text-indigo-700" : "text-gray-700 hover:bg-gray-100"
+            }`}
+          >
+            <Copy className="w-4 h-4" />
+            Duplicates
+            {duplicates.length > 0 && (
+              <span className="ml-auto rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-2 py-0.5">
+                {duplicates.length}
+              </span>
+            )}
           </button>
         </nav>
       </aside>
@@ -520,6 +537,51 @@ export default function App() {
                   ))}
                 </Table>
               </Card>
+            </div>
+          )}
+
+          {activeTab === "duplicates" && (
+            <div className="space-y-6 animate-in fade-in duration-300">
+              {duplicates.length === 0 ? (
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 text-sm text-gray-500">
+                  No possible duplicates detected in the last ingest run.
+                </div>
+              ) : (
+                duplicates.map((g) => (
+                  <div key={g.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div className="px-6 py-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-semibold text-gray-900">
+                          {g.basis === "provider_session_id" ? "Same session ID" : "Overlapping time window"}
+                        </span>
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${g.confidence >= 0.9 ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+                          {Math.round(g.confidence * 100)}% confidence
+                        </span>
+                      </div>
+                      <span className="text-xs text-gray-400">{g.members.length} sources</span>
+                    </div>
+                    <Table headers={["Canonical", "Machine", "Vendor", "Tokens", "Started", "Last Event", "Path"]}>
+                      {g.members.map((m) => (
+                        <tr key={m.source_id} className={m.is_canonical ? "" : "bg-gray-50/60"}>
+                          <td>
+                            {m.is_canonical ? (
+                              <span className="text-emerald-700 font-medium text-xs">counted</span>
+                            ) : (
+                              <span className="text-gray-400 text-xs">excluded</span>
+                            )}
+                          </td>
+                          <td className="text-gray-900">{m.host_id}</td>
+                          <td className="text-gray-900">{m.vendor}</td>
+                          <td className="text-right text-gray-500">{fmt.compact(m.tokens_total)}</td>
+                          <td className="text-gray-500 whitespace-nowrap">{fmt.when(m.started_at)}</td>
+                          <td className="text-gray-500 whitespace-nowrap">{fmt.when(m.last_event_at)}</td>
+                          <td className="text-gray-400 text-xs truncate max-w-[240px]" title={m.source_path}>{m.source_path}</td>
+                        </tr>
+                      ))}
+                    </Table>
+                  </div>
+                ))
+              )}
             </div>
           )}
         </main>

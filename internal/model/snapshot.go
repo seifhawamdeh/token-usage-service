@@ -81,6 +81,16 @@ type ParseResult struct {
 	Error   error
 }
 
+// DuplicateGroup is a set of snapshots believed to represent the same
+// underlying work (copies, resumes, branches, exports), plus which of them
+// should count toward aggregates.
+type DuplicateGroup struct {
+	Basis             string // "provider_session_id" | "time_window"
+	Confidence        float64
+	CanonicalSourceID string
+	SourceIDs         []string
+}
+
 // IngestRun captures one complete pipeline invocation for operational health.
 type IngestRun struct {
 	HostID            string

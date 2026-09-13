@@ -426,7 +426,8 @@ func (a *API) Snapshots(w http.ResponseWriter, r *http.Request) {
 		SELECT source_id, host_id, vendor, COALESCE(model, ''), source_path,
 			tokens_input, tokens_output, tokens_cache_read, tokens_cache_write,
 			tokens_cache_write_5m, tokens_cache_write_1h,
-			rated_cost_usd, provider_cost, last_event_at, started_at, ingested_at, COALESCE(project, '(unmapped)')
+			rated_cost_usd, provider_cost, last_event_at, started_at, ingested_at, COALESCE(project, '(unmapped)'),
+			NOT is_canonical, duplicate_basis, duplicate_confidence
 		FROM v_burn_usage_rated
 		WHERE ($1 = '' OR host_id = $1)
 		  AND ($2 = '' OR vendor = $2)
@@ -452,8 +453,12 @@ func (a *API) Snapshots(w http.ResponseWriter, r *http.Request) {
 			rated, pcost                           sql.NullFloat64
 			lastAt, startAt                        sql.NullTime
 			ingestedAt                             time.Time
+			isDuplicate                            bool
+			dupBasis                               sql.NullString
+			dupConfidence                          sql.NullFloat64
 		)
-		if err := rows.Scan(&id, &machine, &vendor, &model, &path, &in, &outTok, &cr, &cw, &cw5, &cw1h, &rated, &pcost, &lastAt, &startAt, &ingestedAt, &proj); err != nil {
+		if err := rows.Scan(&id, &machine, &vendor, &model, &path, &in, &outTok, &cr, &cw, &cw5, &cw1h, &rated, &pcost, &lastAt, &startAt, &ingestedAt, &proj,
+			&isDuplicate, &dupBasis, &dupConfidence); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
@@ -464,6 +469,7 @@ func (a *API) Snapshots(w http.ResponseWriter, r *http.Request) {
 			"tokens_cache_write_5m": nullInt(cw5), "tokens_cache_write_1h": nullInt(cw1h),
 			"rated_cost_usd": nullFloat(rated), "provider_cost": nullFloat(pcost),
 			"last_event_at": nullTime(lastAt), "started_at": nullTime(startAt), "ingested_at": ingestedAt,
+			"is_duplicate": isDuplicate, "duplicate_basis": nullString(dupBasis), "duplicate_confidence": nullFloat(dupConfidence),
 		})
 	}
 	writeJSON(w, 200, out)
@@ -586,11 +592,102 @@ func nullInt(v sql.NullInt64) any {
 	return v.Int64
 }
 
+func nullIntPtr(v sql.NullInt64) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Int64
+}
+
 func nullFloat(v sql.NullFloat64) any {
 	if !v.Valid {
 		return nil
 	}
 	return v.Float64
+}
+
+// Duplicates lists computed duplicate groups (recomputed wholesale on every
+// ingest run, see internal/dedup) with enough per-member detail to review
+// and, eventually, confirm/reject a match.
+func (a *API) Duplicates(w http.ResponseWriter, r *http.Request) {
+	rows, err := a.DB.QueryContext(r.Context(), `
+		SELECT g.id, g.basis, g.confidence, g.canonical_source_id, g.computed_at,
+			m.source_id, s.host_id, s.vendor, s.source_path, m.is_canonical,
+			s.tokens_total, s.started_at, s.last_event_at
+		FROM burn_duplicate_groups g
+		JOIN burn_duplicate_members m ON m.group_id = g.id
+		JOIN burn_snapshots s ON s.source_id = m.source_id
+		ORDER BY g.id, m.is_canonical DESC, s.source_path
+	`)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+
+	type member struct {
+		SourceID    string  `json:"source_id"`
+		HostID      string  `json:"host_id"`
+		Vendor      string  `json:"vendor"`
+		SourcePath  string  `json:"source_path"`
+		IsCanonical bool    `json:"is_canonical"`
+		TokensTotal *int64  `json:"tokens_total"`
+		StartedAt   *string `json:"started_at"`
+		LastEventAt *string `json:"last_event_at"`
+	}
+	type group struct {
+		ID                int64    `json:"id"`
+		Basis             string   `json:"basis"`
+		Confidence        float64  `json:"confidence"`
+		CanonicalSourceID string   `json:"canonical_source_id"`
+		ComputedAt        string   `json:"computed_at"`
+		Members           []member `json:"members"`
+	}
+
+	groups := []group{}
+	byID := map[int64]*group{}
+	for rows.Next() {
+		var (
+			id                     int64
+			basis, canonicalID     string
+			confidence             float64
+			computedAt             time.Time
+			m                      member
+			tokensTotal            sql.NullInt64
+			startedAt, lastEventAt sql.NullTime
+		)
+		if err := rows.Scan(&id, &basis, &confidence, &canonicalID, &computedAt,
+			&m.SourceID, &m.HostID, &m.Vendor, &m.SourcePath, &m.IsCanonical,
+			&tokensTotal, &startedAt, &lastEventAt); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		m.TokensTotal = nullIntPtr(tokensTotal)
+		if startedAt.Valid {
+			s := startedAt.Time.UTC().Format(time.RFC3339)
+			m.StartedAt = &s
+		}
+		if lastEventAt.Valid {
+			s := lastEventAt.Time.UTC().Format(time.RFC3339)
+			m.LastEventAt = &s
+		}
+
+		existing, ok := byID[id]
+		if !ok {
+			groups = append(groups, group{
+				ID: id, Basis: basis, Confidence: confidence, CanonicalSourceID: canonicalID,
+				ComputedAt: computedAt.UTC().Format(time.RFC3339), Members: []member{},
+			})
+			existing = &groups[len(groups)-1]
+			byID[id] = existing
+		}
+		existing.Members = append(existing.Members, m)
+	}
+	if err := rows.Err(); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, groups)
 }
 
 func (a *API) Cwds(w http.ResponseWriter, r *http.Request) {

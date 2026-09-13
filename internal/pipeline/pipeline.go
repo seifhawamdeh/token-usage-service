@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/seif/token-usage-service/internal/adapter"
+	"github.com/seif/token-usage-service/internal/dedup"
 	"github.com/seif/token-usage-service/internal/identity"
 	"github.com/seif/token-usage-service/internal/model"
 	"github.com/seif/token-usage-service/internal/pathremote"
@@ -22,6 +23,7 @@ type Summary struct {
 	Deferred          int
 	Errors            int
 	PathRemotesUpsert int
+	DuplicateGroups   int
 }
 
 type Runner struct {
@@ -157,6 +159,21 @@ func (r *Runner) Run(ctx context.Context) (sum Summary, runErr error) {
 			sum.PathRemotesUpsert++
 		}
 	}
+
+	if analyzer, ok := r.Sink.(sink.DuplicateAnalyzer); ok {
+		all, err := analyzer.ListSnapshotsForDedup(ctx)
+		if err != nil {
+			log.Error("dedup: list snapshots", "err", err)
+		} else {
+			groups := dedup.Detect(all)
+			if err := analyzer.ReplaceDuplicateGroups(ctx, groups); err != nil {
+				log.Error("dedup: replace groups", "err", err)
+			} else {
+				sum.DuplicateGroups = len(groups)
+			}
+		}
+	}
+
 	return sum, nil
 }
 

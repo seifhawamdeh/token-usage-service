@@ -65,6 +65,7 @@ func main() {
 	mux.HandleFunc("GET /api/daily", api.Daily)
 	mux.HandleFunc("GET /api/snapshots", api.Snapshots)
 	mux.HandleFunc("GET /api/ledger", api.Ledger)
+	mux.HandleFunc("GET /api/duplicates", api.Duplicates)
 	mux.Handle("/", dashboard.StaticHandler())
 
 	network := "tcp"

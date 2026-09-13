@@ -383,6 +383,71 @@ func (s *Sink) RecordRunIssue(ctx context.Context, runID int64, issue model.Inge
 	return err
 }
 
+func (s *Sink) ListSnapshotsForDedup(ctx context.Context) ([]model.BurnSnapshot, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT source_id, host_id, vendor, source_path, COALESCE(provider_session_id, ''),
+			COALESCE(cwd, ''), started_at, last_event_at, tokens_total
+		FROM burn_snapshots`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []model.BurnSnapshot
+	for rows.Next() {
+		var snap model.BurnSnapshot
+		var startedAt, lastEventAt sql.NullTime
+		var total sql.NullInt64
+		if err := rows.Scan(&snap.SourceID, &snap.HostID, &snap.Vendor, &snap.SourcePath,
+			&snap.ProviderSessionID, &snap.CWD, &startedAt, &lastEventAt, &total); err != nil {
+			return nil, err
+		}
+		if startedAt.Valid {
+			t := startedAt.Time
+			snap.StartedAt = &t
+		}
+		if lastEventAt.Valid {
+			t := lastEventAt.Time
+			snap.LastEventAt = &t
+		}
+		snap.Tokens.Total = intPtr(total)
+		out = append(out, snap)
+	}
+	return out, rows.Err()
+}
+
+func (s *Sink) ReplaceDuplicateGroups(ctx context.Context, groups []model.DuplicateGroup) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM burn_duplicate_groups`); err != nil {
+		return fmt.Errorf("clear duplicate groups: %w", err)
+	}
+	for _, g := range groups {
+		var groupID int64
+		err := tx.QueryRowContext(ctx, `
+			INSERT INTO burn_duplicate_groups (basis, confidence, canonical_source_id)
+			VALUES ($1, $2, $3) RETURNING id`,
+			g.Basis, g.Confidence, g.CanonicalSourceID).Scan(&groupID)
+		if err != nil {
+			return fmt.Errorf("insert duplicate group: %w", err)
+		}
+		for _, sourceID := range g.SourceIDs {
+			_, err := tx.ExecContext(ctx, `
+				INSERT INTO burn_duplicate_members (group_id, source_id, is_canonical)
+				VALUES ($1, $2, $3)`,
+				groupID, sourceID, sourceID == g.CanonicalSourceID)
+			if err != nil {
+				return fmt.Errorf("insert duplicate member: %w", err)
+			}
+		}
+	}
+	return tx.Commit()
+}
+
 func nullJSON(b []byte) []byte {
 	if len(b) == 0 {
 		return []byte("{}")
@@ -401,3 +466,4 @@ func pqTextArray(ss []string) any {
 
 var _ sink.Sink = (*Sink)(nil)
 var _ sink.RunRecorder = (*Sink)(nil)
+var _ sink.DuplicateAnalyzer = (*Sink)(nil)

@@ -113,6 +113,26 @@ export interface IngestIssue {
   created_at: string;
 }
 
+export interface DuplicateMember {
+  source_id: string;
+  host_id: string;
+  vendor: string;
+  source_path: string;
+  is_canonical: boolean;
+  tokens_total: number | null;
+  started_at: string | null;
+  last_event_at: string | null;
+}
+
+export interface DuplicateGroup {
+  id: number;
+  basis: string;
+  confidence: number;
+  canonical_source_id: string;
+  computed_at: string;
+  members: DuplicateMember[];
+}
+
 export interface IngestHealth {
   status: "ok" | "degraded" | "failed" | "running" | "no_runs";
   last_run: {

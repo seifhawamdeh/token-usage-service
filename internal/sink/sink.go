@@ -24,3 +24,10 @@ type RunRecorder interface {
 	FinishRun(ctx context.Context, runID int64, run model.IngestRun) error
 	RecordRunIssue(ctx context.Context, runID int64, issue model.IngestIssue) error
 }
+
+// DuplicateAnalyzer is optional; sinks that support it get a post-ingest
+// dedup pass recomputed over every snapshot, replacing the stored groups.
+type DuplicateAnalyzer interface {
+	ListSnapshotsForDedup(ctx context.Context) ([]model.BurnSnapshot, error)
+	ReplaceDuplicateGroups(ctx context.Context, groups []model.DuplicateGroup) error
+}

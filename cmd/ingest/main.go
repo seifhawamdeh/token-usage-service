@@ -101,8 +101,8 @@ func main() {
 			fmt.Fprintf(os.Stderr, "ingest failed: %v\n", err)
 			os.Exit(3)
 		}
-		fmt.Printf("scanned=%d unchanged_skipped=%d parsed=%d upserted=%d skipped=%d deferred=%d errors=%d path_remotes=%d\n",
-			sum.Scanned, sum.UnchangedSkipped, sum.Parsed, sum.Upserted, sum.Skipped, sum.Deferred, sum.Errors, sum.PathRemotesUpsert)
+		fmt.Printf("scanned=%d unchanged_skipped=%d parsed=%d upserted=%d skipped=%d deferred=%d errors=%d path_remotes=%d duplicate_groups=%d\n",
+			sum.Scanned, sum.UnchangedSkipped, sum.Parsed, sum.Upserted, sum.Skipped, sum.Deferred, sum.Errors, sum.PathRemotesUpsert, sum.DuplicateGroups)
 		// Per-source errors still exit 0 (PRD)
 		os.Exit(0)
 	case "help", "-h", "--help":
