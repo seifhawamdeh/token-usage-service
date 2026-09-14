@@ -45,11 +45,17 @@ Set-Location C:\Services\token-usage-service
 Copy-Item .env.example .env
 New-Item -ItemType Directory -Force .\bin | Out-Null
 go build -o C:\Services\token-usage-service\bin\token-usage-ingest.exe .\cmd\ingest
+go build -o C:\Services\token-usage-service\bin\token-usage-loadworkstyle.exe .\cmd\loadworkstyle
 go build -o C:\Services\token-usage-service\bin\token-usage-dashboard.exe .\cmd\dashboard
 ```
 
 The first build downloads module dependencies and can take a minute or two
 longer than subsequent builds.
+
+`token-usage-loadworkstyle.exe` loads raw slash-command and prompt history (no
+token/cost data) into a staging table for later analysis. It shares
+`DATABASE_URL` and `HOST_ID` from `.env`; parsing into structured fields is
+not implemented yet.
 
 ## 3. Configure, validate, and run once
 
@@ -59,6 +65,11 @@ Edit `.env` and set `DATABASE_URL`, `HOST_ID`, and `ENABLED_VENDORS`, then:
 .\bin\token-usage-ingest.exe validate-config
 .\bin\token-usage-ingest.exe migrate
 .\bin\token-usage-ingest.exe ingest
+.\bin\token-usage-loadworkstyle.exe `
+  claude_history=$env:USERPROFILE\.claude\history.jsonl `
+  claude_caveman_history=$env:USERPROFILE\.claude\.caveman-history.jsonl `
+  codex_history=$env:USERPROFILE\.codex\history.jsonl `
+  codex_session_index=$env:USERPROFILE\.codex\session_index.jsonl
 ```
 
 The manual ingest should finish with `errors=0` before installing the
@@ -70,10 +81,10 @@ especially `OPENCODE_DB_PATH` and `CURSOR_STATE_DB`.
 
 ## 4. Create the scheduled task
 
-Pick one of the two paths below. Both result in a task that runs
-`token-usage-ingest.exe ingest` every 30 minutes, only while the user is logged
-on (needed to read that user's provider data), without starting overlapping
-runs.
+Pick one of the two paths below. Both result in a task with two actions —
+`token-usage-ingest.exe ingest` then `token-usage-loadworkstyle.exe` — run in
+order every 30 minutes, only while the user is logged on (needed to read that
+user's provider data), without starting overlapping runs.
 
 ### Path A: Task Scheduler GUI
 
@@ -84,10 +95,16 @@ runs.
 3. Add action **Start a program**. Program:
    `C:\Services\token-usage-service\bin\token-usage-ingest.exe`; arguments:
    `ingest`; start in: `C:\Services\token-usage-service`.
-4. In **Settings**, enable **Run task as soon as possible after a scheduled
+4. Add a second action, same **Start a program** type, that runs after the
+   first: Program: `C:\Services\token-usage-service\bin\token-usage-loadworkstyle.exe`;
+   arguments:
+   `claude_history=%USERPROFILE%\.claude\history.jsonl claude_caveman_history=%USERPROFILE%\.claude\.caveman-history.jsonl codex_history=%USERPROFILE%\.codex\history.jsonl codex_session_index=%USERPROFILE%\.codex\session_index.jsonl`;
+   start in: `C:\Services\token-usage-service`. Task Scheduler runs multiple
+   actions in the order listed.
+5. In **Settings**, enable **Run task as soon as possible after a scheduled
    start is missed** and disable parallel starts by choosing **Do not start a
    new instance**.
-5. Run the task once. Confirm **Last Run Result** is `0x0`; inspect the Windows
+6. Run the task once. Confirm **Last Run Result** is `0x0`; inspect the Windows
    Task Scheduler operational log if it is not.
 
 The **Start in** value is required: it lets the executable load the repository
@@ -98,15 +115,21 @@ The **Start in** value is required: it lets the executable load the repository
 Equivalent to path A, scripted. Run from an elevated PowerShell prompt:
 
 ```powershell
-$action  = New-ScheduledTaskAction -Execute 'C:\Services\token-usage-service\bin\token-usage-ingest.exe' `
+$ingestAction = New-ScheduledTaskAction -Execute 'C:\Services\token-usage-service\bin\token-usage-ingest.exe' `
              -Argument 'ingest' -WorkingDirectory 'C:\Services\token-usage-service'
+$workstyleArgs = 'claude_history=' + $env:USERPROFILE + '\.claude\history.jsonl ' +
+                 'claude_caveman_history=' + $env:USERPROFILE + '\.claude\.caveman-history.jsonl ' +
+                 'codex_history=' + $env:USERPROFILE + '\.codex\history.jsonl ' +
+                 'codex_session_index=' + $env:USERPROFILE + '\.codex\session_index.jsonl'
+$workstyleAction = New-ScheduledTaskAction -Execute 'C:\Services\token-usage-service\bin\token-usage-loadworkstyle.exe' `
+             -Argument $workstyleArgs -WorkingDirectory 'C:\Services\token-usage-service'
 $trigger = New-ScheduledTaskTrigger -Daily -At 12am
 $rep = (New-ScheduledTaskTrigger -Once -At (Get-Date) `
           -RepetitionInterval (New-TimeSpan -Minutes 30) `
           -RepetitionDuration (New-TimeSpan -Days 3650)).Repetition
 $trigger.Repetition = $rep
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew
-Register-ScheduledTask -TaskName 'Token Usage Ingest' -Action $action -Trigger $trigger `
+Register-ScheduledTask -TaskName 'Token Usage Ingest' -Action $ingestAction, $workstyleAction -Trigger $trigger `
   -Settings $settings -RunLevel Limited -Description 'Collects local AI usage token data every 30 minutes'
 Start-ScheduledTask -TaskName 'Token Usage Ingest'
 ```
@@ -173,6 +196,7 @@ account that owns or can read the provider files. Do not run under
 ```powershell
 git pull --ff-only
 go build -o C:\Services\token-usage-service\bin\token-usage-ingest.exe .\cmd\ingest
+go build -o C:\Services\token-usage-service\bin\token-usage-loadworkstyle.exe .\cmd\loadworkstyle
 go build -o C:\Services\token-usage-service\bin\token-usage-dashboard.exe .\cmd\dashboard
 .\bin\token-usage-ingest.exe migrate
 ```

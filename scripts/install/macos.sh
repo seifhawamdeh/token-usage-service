@@ -73,6 +73,7 @@ step_build() {
   bold "4/6 Build"
   mkdir -p "$BIN_DIR"
   (cd "$REPO_DIR" && go build -o "$BIN_DIR/token-usage-ingest" ./cmd/ingest)
+  (cd "$REPO_DIR" && go build -o "$BIN_DIR/token-usage-loadworkstyle" ./cmd/loadworkstyle)
   (cd "$REPO_DIR" && go build -o "$BIN_DIR/token-usage-dashboard" ./cmd/dashboard)
   info "built binaries in $BIN_DIR"
 }
@@ -82,6 +83,11 @@ step_migrate() {
   (cd "$REPO_DIR" && "$BIN_DIR/token-usage-ingest" validate-config)
   (cd "$REPO_DIR" && "$BIN_DIR/token-usage-ingest" migrate)
   (cd "$REPO_DIR" && "$BIN_DIR/token-usage-ingest" ingest)
+  (cd "$REPO_DIR" && "$BIN_DIR/token-usage-loadworkstyle" \
+    claude_history="$HOME/.claude/history.jsonl" \
+    claude_caveman_history="$HOME/.claude/.caveman-history.jsonl" \
+    codex_history="$HOME/.codex/history.jsonl" \
+    codex_session_index="$HOME/.codex/session_index.jsonl")
 }
 
 unload_agent() {
@@ -90,13 +96,26 @@ unload_agent() {
 
 step_services() {
   bold "6/6 Scheduling"
-  local reply repo_xml ingest_xml dashboard_xml
+  local reply repo_xml run_xml dashboard_xml run_script
   mkdir -p "$AGENT_DIR" "$LOG_DIR"
   repo_xml="$(xml_escape "$REPO_DIR")"
-  ingest_xml="$(xml_escape "$BIN_DIR/token-usage-ingest")"
   dashboard_xml="$(xml_escape "$BIN_DIR/token-usage-dashboard")"
 
-  read -r -p "  install launchd agent for ingest (every 12h)? [Y/n] " reply </dev/tty
+  run_script="$BIN_DIR/token-usage-run.sh"
+  cat > "$run_script" <<EOF
+#!/bin/sh
+set -e
+"$BIN_DIR/token-usage-ingest" ingest
+"$BIN_DIR/token-usage-loadworkstyle" \\
+  claude_history="\$HOME/.claude/history.jsonl" \\
+  claude_caveman_history="\$HOME/.claude/.caveman-history.jsonl" \\
+  codex_history="\$HOME/.codex/history.jsonl" \\
+  codex_session_index="\$HOME/.codex/session_index.jsonl"
+EOF
+  chmod +x "$run_script"
+  run_xml="$(xml_escape "$run_script")"
+
+  read -r -p "  install launchd agent for ingest (every 30m)? [Y/n] " reply </dev/tty
   if [[ ! "$reply" =~ ^[nN] ]]; then
     unload_agent "$INGEST_LABEL"
     cat > "$AGENT_DIR/$INGEST_LABEL.plist" <<EOF
@@ -104,9 +123,9 @@ step_services() {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>$INGEST_LABEL</string>
-  <key>ProgramArguments</key><array><string>$ingest_xml</string><string>ingest</string></array>
+  <key>ProgramArguments</key><array><string>$run_xml</string></array>
   <key>WorkingDirectory</key><string>$repo_xml</string>
-  <key>StartInterval</key><integer>43200</integer>
+  <key>StartInterval</key><integer>1800</integer>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>$(xml_escape "$LOG_DIR/token-usage-ingest.log")</string>
   <key>StandardErrorPath</key><string>$(xml_escape "$LOG_DIR/token-usage-ingest.error.log")</string>
@@ -148,6 +167,7 @@ step_migrate
 step_services
 
 bold "Done."
-info "ingest:    $BIN_DIR/token-usage-ingest ingest"
-info "dashboard: $BIN_DIR/token-usage-dashboard"
+info "ingest:      $BIN_DIR/token-usage-ingest ingest"
+info "loadworkstyle: $BIN_DIR/token-usage-loadworkstyle"
+info "dashboard:   $BIN_DIR/token-usage-dashboard"
 info "config:    $ENV_FILE"

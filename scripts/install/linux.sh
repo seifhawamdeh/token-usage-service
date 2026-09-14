@@ -71,8 +71,10 @@ step_build() {
   bold "4/6 Build"
   mkdir -p "$BIN_DIR"
   (cd "$REPO_DIR" && go build -o "$BIN_DIR/token-usage-ingest" ./cmd/ingest)
+  (cd "$REPO_DIR" && go build -o "$BIN_DIR/token-usage-loadworkstyle" ./cmd/loadworkstyle)
   (cd "$REPO_DIR" && go build -o "$BIN_DIR/token-usage-dashboard" ./cmd/dashboard)
   info "built $BIN_DIR/token-usage-ingest"
+  info "built $BIN_DIR/token-usage-loadworkstyle"
   info "built $BIN_DIR/token-usage-dashboard"
 }
 
@@ -81,18 +83,23 @@ step_migrate() {
   (cd "$REPO_DIR" && "$BIN_DIR/token-usage-ingest" validate-config)
   (cd "$REPO_DIR" && "$BIN_DIR/token-usage-ingest" migrate)
   (cd "$REPO_DIR" && "$BIN_DIR/token-usage-ingest" ingest)
+  (cd "$REPO_DIR" && "$BIN_DIR/token-usage-loadworkstyle" \
+    claude_history="$HOME/.claude/history.jsonl" \
+    claude_caveman_history="$HOME/.claude/.caveman-history.jsonl" \
+    codex_history="$HOME/.codex/history.jsonl" \
+    codex_session_index="$HOME/.codex/session_index.jsonl")
 }
 
 step_services() {
   bold "6/6 Scheduling"
   if ! require_cmd systemctl; then
     info "no systemd; add this to crontab -e instead:"
-    info "0 */12 * * * cd $REPO_DIR && $BIN_DIR/token-usage-ingest ingest"
+    info "*/30 * * * * cd $REPO_DIR && $BIN_DIR/token-usage-ingest ingest && $BIN_DIR/token-usage-loadworkstyle claude_history=\$HOME/.claude/history.jsonl claude_caveman_history=\$HOME/.claude/.caveman-history.jsonl codex_history=\$HOME/.codex/history.jsonl codex_session_index=\$HOME/.codex/session_index.jsonl"
     return
   fi
 
   local reply
-  read -r -p "  install systemd user timer for ingest (every 12h)? [Y/n] " reply </dev/tty
+  read -r -p "  install systemd user timer for ingest (every 30m)? [Y/n] " reply </dev/tty
   if [[ ! "$reply" =~ ^[nN] ]]; then
     mkdir -p "$UNIT_DIR"
     sed -e "s|%h/src/token-usage-service|$REPO_DIR|g" \
@@ -123,6 +130,7 @@ step_migrate
 step_services
 
 bold "Done."
-info "ingest:    $BIN_DIR/token-usage-ingest ingest"
-info "dashboard: $BIN_DIR/token-usage-dashboard"
+info "ingest:      $BIN_DIR/token-usage-ingest ingest"
+info "loadworkstyle: $BIN_DIR/token-usage-loadworkstyle"
+info "dashboard:   $BIN_DIR/token-usage-dashboard"
 info "config:    $ENV_FILE"

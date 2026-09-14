@@ -35,15 +35,46 @@ Default discovery on macOS checks the same `~/.claude`, `~/.codex`, and
 
 ```bash
 go build -o "$HOME/.local/bin/token-usage-ingest" ./cmd/ingest
+go build -o "$HOME/.local/bin/token-usage-loadworkstyle" ./cmd/loadworkstyle
 go build -o "$HOME/.local/bin/token-usage-dashboard" ./cmd/dashboard
 ~/.local/bin/token-usage-ingest validate-config
 ~/.local/bin/token-usage-ingest migrate
 ~/.local/bin/token-usage-ingest ingest
+~/.local/bin/token-usage-loadworkstyle \
+  claude_history=$HOME/.claude/history.jsonl \
+  claude_caveman_history=$HOME/.claude/.caveman-history.jsonl \
+  codex_history=$HOME/.codex/history.jsonl \
+  codex_session_index=$HOME/.codex/session_index.jsonl
 ```
+
+`token-usage-loadworkstyle` loads raw slash-command and prompt history (no
+token/cost data) into a staging table for later analysis. It shares
+`DATABASE_URL` and `HOST_ID` from `.env`; parsing into structured fields is
+not implemented yet.
 
 The manual ingest should finish with `errors=0` before installing the agent.
 
 ## 4. Install the ingest LaunchAgent
+
+`ProgramArguments` runs a single command, so both steps (ledger ingest, then
+workstyle-log staging) go through a small wrapper script.
+
+Create `~/.local/bin/token-usage-run.sh`:
+
+```bash
+#!/bin/sh
+set -e
+"$HOME/.local/bin/token-usage-ingest" ingest
+"$HOME/.local/bin/token-usage-loadworkstyle" \
+  claude_history="$HOME/.claude/history.jsonl" \
+  claude_caveman_history="$HOME/.claude/.caveman-history.jsonl" \
+  codex_history="$HOME/.codex/history.jsonl" \
+  codex_session_index="$HOME/.codex/session_index.jsonl"
+```
+
+```bash
+chmod +x "$HOME/.local/bin/token-usage-run.sh"
+```
 
 Create `~/Library/LaunchAgents/com.example.token-usage-ingest.plist`. Replace
 `USER` in all paths; launchd does not expand `$HOME` or `~` in plist values.
@@ -58,8 +89,7 @@ Create `~/Library/LaunchAgents/com.example.token-usage-ingest.plist`. Replace
   <string>com.example.token-usage-ingest</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/USER/.local/bin/token-usage-ingest</string>
-    <string>ingest</string>
+    <string>/Users/USER/.local/bin/token-usage-run.sh</string>
   </array>
   <key>WorkingDirectory</key>
   <string>/Users/USER/src/token-usage-service</string>
@@ -75,7 +105,11 @@ Create `~/Library/LaunchAgents/com.example.token-usage-ingest.plist`. Replace
 </plist>
 ```
 
-`StartInterval` is in seconds; `1800` is 30 minutes.
+`StartInterval` is in seconds; `1800` is 30 minutes. `token-usage-loadworkstyle`
+loads raw slash-command and prompt history (no token/cost data) into a staging
+table for later analysis; it shares `DATABASE_URL` and `HOST_ID` from `.env`
+via the working directory, and parsing into structured fields is not
+implemented yet.
 
 Validate, enable, and test it:
 

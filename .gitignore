@@ -12,7 +12,11 @@ coverage.out
 # Build outputs
 /dashboard
 /ingest
+/loadworkstyle
 node_modules/
+
+# Local DB backups (may contain real usage/session data)
+backups/
 
 # Local agent / IDE MCP configs (machine-specific paths)
 .agents/

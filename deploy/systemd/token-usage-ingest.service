@@ -9,6 +9,8 @@ WorkingDirectory=%h/src/token-usage-service
 EnvironmentFile=%h/src/token-usage-service/.env
 # Build once: go build -o %h/.local/bin/token-usage-ingest ./cmd/ingest
 ExecStart=%h/.local/bin/token-usage-ingest ingest
+# Build once: go build -o %h/.local/bin/token-usage-loadworkstyle ./cmd/loadworkstyle
+ExecStart=%h/.local/bin/token-usage-loadworkstyle claude_history=%h/.claude/history.jsonl claude_caveman_history=%h/.claude/.caveman-history.jsonl codex_history=%h/.codex/history.jsonl codex_session_index=%h/.codex/session_index.jsonl
 Nice=10
 
 [Install]

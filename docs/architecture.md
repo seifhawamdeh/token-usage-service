@@ -31,7 +31,7 @@ schedule → load config → for each enabled adapter:
 | Process | One-shot CLI; modular `adapters` / `pipeline` / `sinks` |
 | Runtime | **Go** |
 | Sink (v1) | **PostgreSQL only** (Git later) |
-| Accounting | Per-source snapshots; disclose double-count risk; no cross-source dedup |
+| Accounting | Per-source snapshots; duplicate groups detected and flagged (`internal/dedup`, recomputed every ingest) but not auto-excluded from totals |
 | Paths | Full absolute paths; **no redaction**; remotes in `path_remotes` |
 | Cost | `provider_cost` = vendor-reported only; optional `model_costs` rate card → `v_burn_usage_rated.rated_cost_usd` |
 | Tokens | Nullable fields (`*int64`); missing ≠ zero |
@@ -40,6 +40,7 @@ schedule → load config → for each enabled adapter:
 
 ```text
 cmd/ingest/                 CLI: migrate | validate-config | ingest
+cmd/loadworkstyle/          CLI: stage raw slash-command/prompt history lines (no token/cost data)
 cmd/dashboard/              Local HTTP UI + JSON API
 internal/
   config/                   env loading
@@ -49,6 +50,7 @@ internal/
     claudecode/ codex/ opencode/ githubcopilot/
     antigravity/ gemini/ cursor/ cursorusage/
   pipeline/                 discover → compare → parse → upsert
+  dedup/                    duplicate-group detection (provider_session_id, host+cwd+time-window)
   pathremote/               git rev-parse / remote get-url
   sink/postgres/            DB + embedded migrations
   dashboard/                API handlers + embedded static UI
@@ -65,6 +67,8 @@ deploy/systemd/             user timer + oneshot service
 | `model_costs` | Operator rate card: USD per 1M tokens by `model_key` + **dated** `[effective_from, effective_to)` periods |
 | `model_cost_aliases` | Display / vendor labels → `model_key` |
 | `schema_migrations` | Applied migration filenames |
+| `burn_duplicate_groups` / `burn_duplicate_members` | Recomputed wholesale every ingest run (`internal/dedup`); groups likely-duplicate snapshots, marks one canonical |
+| `raw_workstyle_logs` | Raw slash-command/prompt history lines, staged as-is by `cmd/loadworkstyle`; parsing deferred |
 
 View **`v_burn_usage_rated`**: joins each snapshot to the rate row covering `COALESCE(last_event_at, started_at, ingested_at)` → `rated_cost_usd`. Full catalog / cache-window / accuracy notes: [cost-and-accuracy.md](cost-and-accuracy.md). `provider_cost` stays vendor-reported.
 
@@ -104,12 +108,12 @@ See `.env.example`.
 - Desktop app SQLite as system of record
 - Invoice reconciliation / Analytics UI
 - Whole-disk scan, realtime watchers, multi-writer Git
-- Exact deduplicated machine-wide billing totals
+- Automatic exclusion of detected duplicates from aggregate totals (detection exists; totals still require filtering on `is_canonical`)
 - Cursor session ↔ usage-event join
 
 ## Deferred
 
 1. Git remote sink (shared pipeline already sink-shaped)
-2. Cross-source session linking / dedup
+2. Automatic totals adjustment from detected duplicate groups (detection itself is shipped — see `internal/dedup`, `burn_duplicate_groups`)
 3. Cursor session ↔ usage-event join (CSV lacks composer ids)
 4. Richer active-file / bounded-prefix freshness policies

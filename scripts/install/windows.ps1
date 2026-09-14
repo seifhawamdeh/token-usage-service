@@ -58,6 +58,8 @@ Push-Location $RepoDir
 try {
     go build -o (Join-Path $BinDir 'token-usage-ingest.exe') ./cmd/ingest
     if ($LASTEXITCODE -ne 0) { throw 'Ingest build failed.' }
+    go build -o (Join-Path $BinDir 'token-usage-loadworkstyle.exe') ./cmd/loadworkstyle
+    if ($LASTEXITCODE -ne 0) { throw 'Loadworkstyle build failed.' }
     go build -o (Join-Path $BinDir 'token-usage-dashboard.exe') ./cmd/dashboard
     if ($LASTEXITCODE -ne 0) { throw 'Dashboard build failed.' }
 } finally {
@@ -67,6 +69,13 @@ Write-Host "  built binaries in $BinDir"
 
 Write-Step '5/6 Validate + migrate + first ingest'
 $IngestExe = Join-Path $BinDir 'token-usage-ingest.exe'
+$LoadworkstyleExe = Join-Path $BinDir 'token-usage-loadworkstyle.exe'
+$WorkstyleArgs = @(
+    "claude_history=$env:USERPROFILE\.claude\history.jsonl"
+    "claude_caveman_history=$env:USERPROFILE\.claude\.caveman-history.jsonl"
+    "codex_history=$env:USERPROFILE\.codex\history.jsonl"
+    "codex_session_index=$env:USERPROFILE\.codex\session_index.jsonl"
+)
 Push-Location $RepoDir
 try {
     & $IngestExe validate-config
@@ -75,23 +84,26 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Migration failed.' }
     & $IngestExe ingest
     if ($LASTEXITCODE -ne 0) { throw 'First ingest failed.' }
+    & $LoadworkstyleExe @WorkstyleArgs
+    if ($LASTEXITCODE -ne 0) { throw 'First workstyle-log load failed.' }
 } finally {
     Pop-Location
 }
 
 Write-Step '6/6 Scheduling'
-$Reply = Read-Host '  install Scheduled Task for ingest (every 12h)? [Y/n]'
+$Reply = Read-Host '  install Scheduled Task for ingest (every 30m)? [Y/n]'
 if ($Reply -notmatch '^[nN]') {
-    $Action = New-ScheduledTaskAction -Execute $IngestExe -Argument 'ingest' -WorkingDirectory $RepoDir
+    $IngestAction = New-ScheduledTaskAction -Execute $IngestExe -Argument 'ingest' -WorkingDirectory $RepoDir
+    $WorkstyleAction = New-ScheduledTaskAction -Execute $LoadworkstyleExe -Argument ($WorkstyleArgs -join ' ') -WorkingDirectory $RepoDir
     $Trigger = New-ScheduledTaskTrigger -Daily -At 12am
     $Repetition = (New-ScheduledTaskTrigger -Once -At (Get-Date) `
-        -RepetitionInterval (New-TimeSpan -Hours 12) `
+        -RepetitionInterval (New-TimeSpan -Minutes 30) `
         -RepetitionDuration (New-TimeSpan -Days 3650)).Repetition
     $Trigger.Repetition = $Repetition
     $Settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew
-    Register-ScheduledTask -TaskName 'Token Usage Ingest' -Action $Action -Trigger $Trigger `
+    Register-ScheduledTask -TaskName 'Token Usage Ingest' -Action $IngestAction, $WorkstyleAction -Trigger $Trigger `
         -Settings $Settings -RunLevel Limited -Force `
-        -Description 'Collects local AI token usage every 12 hours' | Out-Null
+        -Description 'Collects local AI token usage every 30 minutes' | Out-Null
     Start-ScheduledTask -TaskName 'Token Usage Ingest'
     Write-Host '  ingest task installed and started'
 }
@@ -110,6 +122,7 @@ if ($Reply -match '^[yY]') {
 }
 
 Write-Host 'Done.' -ForegroundColor Cyan
-Write-Host "  ingest:    $IngestExe ingest"
-Write-Host "  dashboard: $(Join-Path $BinDir 'token-usage-dashboard.exe')"
+Write-Host "  ingest:        $IngestExe ingest"
+Write-Host "  loadworkstyle: $LoadworkstyleExe"
+Write-Host "  dashboard:     $(Join-Path $BinDir 'token-usage-dashboard.exe')"
 Write-Host "  config:    $EnvFile"

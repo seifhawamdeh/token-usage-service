@@ -135,13 +135,20 @@ The supplied `.env.example` enables all adapters; narrow that list during setup.
 | `go run ./cmd/ingest migrate` | Apply embedded schema migrations |
 | `go run ./cmd/ingest ingest` | Run one ingestion pass |
 | `go run ./cmd/ingest ingest --force` | Reprocess sources regardless of checkpoints |
+| `go run ./cmd/loadworkstyle <kind>=<path> ...` | Load raw slash-command/prompt history lines into `raw_workstyle_logs` for later analysis (no token/cost data) |
 
 To install a local executable:
 
 ```bash
 mkdir -p ~/.local/bin
 go build -o ~/.local/bin/token-usage-ingest ./cmd/ingest
+go build -o ~/.local/bin/token-usage-loadworkstyle ./cmd/loadworkstyle
 ~/.local/bin/token-usage-ingest ingest
+~/.local/bin/token-usage-loadworkstyle \
+  claude_history=~/.claude/history.jsonl \
+  claude_caveman_history=~/.claude/.caveman-history.jsonl \
+  codex_history=~/.codex/history.jsonl \
+  codex_session_index=~/.codex/session_index.jsonl
 ```
 
 Run from the directory containing `.env`, or supply configuration through environment variables.
@@ -161,12 +168,14 @@ The summary reports scanned, unchanged, parsed, upserted, skipped, deferred, and
 | `project_cwds` | `(host_id, work directory)` → project name, user-mapped in the dashboard's Configs tab |
 | `model_costs` | USD-per-1M-token rate card by `model_key` with dated `[effective_from, effective_to)` periods |
 | `model_cost_aliases` | Vendor/display labels → `model_key` |
+| `burn_duplicate_groups` / `burn_duplicate_members` | Recomputed on every ingest: groups of likely-duplicate snapshots and which one is canonical |
+| `raw_workstyle_logs` | Raw slash-command and prompt history lines (no token/cost data), staged for future parsing into work-pattern analytics |
 
 Query **`v_burn_usage_rated`** for snapshots plus `rated_cost_usd`. Details: catalog periods, Anthropic 5m/1h cache windows, long-context tiers, and accuracy bands — [cost and accuracy](docs/cost-and-accuracy.md).
 
 Source identity includes the host, adapter, and source path. Reprocessing updates the existing snapshot for that identity. Adapter and schema versions participate in checkpoint comparison.
 
-**Snapshots represent individual sources, not exact deduplicated machine-wide totals.** Copies, branches, resumed files, and overlapping exports can repeat usage. Cross-source deduplication is not implemented. Missing values mean unknown usage, not zero consumption. The ledger begins at migration time; a source's first recorded revision contributes its current cumulative total, and later revisions contribute deltas.
+**Snapshots represent individual sources; aggregate totals are not automatically deduplicated.** Copies, branches, resumed files, and overlapping exports can repeat usage. A duplicate-detection pass (`internal/dedup`) runs on every ingest, grouping likely duplicates by shared `provider_session_id` or by overlapping host+cwd+time windows, and picks a canonical snapshot per group (`burn_duplicate_groups` / `burn_duplicate_members`, exposed as `duplicate_group_id` / `is_canonical` / `duplicate_basis` / `duplicate_confidence` on `v_burn_usage_rated` and via the dashboard's Duplicates view) — but totals still include non-canonical rows unless you filter on `is_canonical` yourself. Missing values mean unknown usage, not zero consumption. The ledger begins at migration time; a source's first recorded revision contributes its current cumulative total, and later revisions contribute deltas.
 
 ## Scheduling
 
