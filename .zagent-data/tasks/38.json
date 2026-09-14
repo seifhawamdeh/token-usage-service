@@ -1,4 +1,14 @@
 {
   "schemaVersion": "4",
-  "tasks": {}
+  "tasks": {
+    "80129205-6ea6-49a4-8173-7dcf3b0b0e35": {
+      "createdAt": "2026-09-13T23:45:27.282Z",
+      "description": "CSV-only fallback works but must label output as estimated. No dependency on Cursor Admin API or OpenTelemetry — CSV heuristic mapper is the only planned approach for now.\n\n1. Add event-to-session attribution table. Keep raw CSV rows unchanged.\n   usage_event_id -> composer_id | confidence | method | candidate_count\n\n2. Build candidates per CSV row.\n   - Session active during event time: created_at <= event_at <= last_updated_at + 5m\n   - Exact model match: bonus. Weak signal: 1,081/1,242 rows use auto.\n   - Transcript activity near event time: strong bonus, if JSONL carries per-message timestamps.\n   - Single candidate: assign high confidence.\n   - Multiple candidates: fractional allocation, weights sum to 1, mark low confidence.\n   - No candidate: leave unassigned.\n\n3. Group CSV rows into activity bursts, UI-only grouping (not a session proxy). 10-minute idle gap -> 145 bursts in current export, largest burst 208 rows. Burst != session.\n\n4. Never overwrite billing totals. Show:\n   - Raw Cursor total: exact\n   - Attributed-to-project/session total: estimated\n   - Unattributed total: exact remainder\n\nBlocker: local adapter (internal/adapter/cursor/adapter.go:90) only has composer createdAt/lastUpdatedAt, no per-bubble timestamps. Time-only matching weak for concurrent sessions.\n\nExplicitly out of scope: Cursor Admin API connector and OpenTelemetry ingest — this app will not depend on Cursor APIs for attribution.",
+      "id": "80129205-6ea6-49a4-8173-7dcf3b0b0e35",
+      "status": "open",
+      "title": "Cursor CSV event-to-session attribution (heuristic, no Cursor API dependency)",
+      "type": "task",
+      "updatedAt": "2026-09-13T23:45:27.282Z"
+    }
+  }
 }
