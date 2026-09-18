@@ -1,9 +1,9 @@
 {
   "format": "text-sharded-json",
-  "formatVersion": 2,
-  "milestoneSchemaVersion": "1",
+  "formatVersion": 4,
+  "milestoneSchemaVersion": "3",
   "shardAlgorithm": "sha256-first-6-bits",
   "shardCount": 64,
-  "taskSchemaVersion": "4",
+  "taskSchemaVersion": "8",
   "workspaceId": "8fc5de20-624c-47a9-adf9-7c2e04705903"
 }

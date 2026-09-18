@@ -1,4 +1,36 @@
 {
+  "executionProfiles": [
+    {
+      "agentTypeId": "",
+      "autoStart": false,
+      "closesParent": false,
+      "deleted": false,
+      "expectedSuccessState": "done",
+      "id": "default-cleanup",
+      "instructionTemplate": "Prepare this work package for integrated review.\n\n1. Inspect sibling task states and outcomes.\n2. Inspect remaining repository changes.\n3. Identify intended leftover work; do not discard changes without confirming their purpose.\n4. Stage and commit appropriate closure changes.\n5. Run lightweight checks relevant to the changes.\n\nLeave the repository ready for integrated review.",
+      "title": "Cleanup"
+    },
+    {
+      "agentTypeId": "",
+      "autoStart": false,
+      "closesParent": false,
+      "deleted": false,
+      "expectedSuccessState": "done",
+      "id": "default-engineer",
+      "instructionTemplate": "Implement this task end to end.\n\n1. Read the task description and any linked spec in full before changing code.\n2. Implement the change, keeping scope to what the task describes.\n3. Run the relevant tests and typecheck; fix failures introduced by this change.\n4. Leave the branch in a mergeable state with the work fully committed.\n\nFlag anything the task asks for that the codebase doesn't yet support instead of inventing it.",
+      "title": "Engineer"
+    },
+    {
+      "agentTypeId": "",
+      "autoStart": false,
+      "closesParent": true,
+      "deleted": false,
+      "expectedSuccessState": "done",
+      "id": "default-review",
+      "instructionTemplate": "Perform integrated closure review for this parent task.\n\n1. Inspect the parent scope and intended outcomes.\n2. Inspect child task outcomes.\n3. Review repository changes.\n4. Run integrated verification.\n5. Inspect relevant tests.\n6. Identify missing implementation.\n7. Fix minor omissions where appropriate.\n8. Flag substantial missing work instead of concealing it.\n9. Verify documentation.\n10. Approve parent completion only when the package is complete.",
+      "title": "Review"
+    }
+  ],
   "milestones": {
     "inbox": {
       "id": "inbox",
@@ -8,5 +40,43 @@
   "order": [
     "inbox"
   ],
-  "schemaVersion": "1"
+  "schemaVersion": "3",
+  "taskTypes": [
+    {
+      "archived": false,
+      "id": "bug",
+      "label": "Bug",
+      "sortOrder": 0
+    },
+    {
+      "archived": false,
+      "id": "feature",
+      "label": "Feature",
+      "sortOrder": 1
+    },
+    {
+      "archived": false,
+      "id": "review",
+      "label": "Review",
+      "sortOrder": 2
+    },
+    {
+      "archived": false,
+      "id": "chore",
+      "label": "Chore",
+      "sortOrder": 3
+    },
+    {
+      "archived": false,
+      "id": "meta",
+      "label": "Meta",
+      "sortOrder": 4
+    },
+    {
+      "archived": false,
+      "id": "task",
+      "label": "General",
+      "sortOrder": 5
+    }
+  ]
 }
