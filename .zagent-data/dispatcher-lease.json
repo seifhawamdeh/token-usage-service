@@ -1,8 +1,8 @@
 {
-  "acquiredAt": "2026-10-07T13:52:42.079Z",
-  "expiresAt": "2026-10-07T15:07:56.940Z",
-  "generation": 8988,
+  "acquiredAt": "2026-10-07T22:15:43.298Z",
+  "expiresAt": "2026-10-07T22:17:13.298Z",
+  "generation": 8989,
   "holderMachineId": "ebb1665b-0372-485a-bc12-3c89bc899d01",
-  "leaseId": "7afa109a-bc35-4dad-91de-b2a740d04cfc",
+  "leaseId": "db6a728c-edc0-4263-a30f-bd10b783b25d",
   "workspaceId": "685a17ed-238f-4190-92ee-450e9975b8f8"
 }
